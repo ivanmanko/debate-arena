@@ -46,7 +46,7 @@ select = ["E", "F", "I", "UP", "B", "W", "SIM", "ASYNC"]
 ignore = ["B008"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["debate_arena", "tests"]
+known-first-party = ["debate_arena", "evals", "tests"]
 
 [tool.ruff.lint.per-file-ignores]
 # Prompt text is intentionally kept as long, readable literal lines.
