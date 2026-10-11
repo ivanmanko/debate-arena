@@ -19,6 +19,7 @@ from debate_arena.domain.ports import ChatRequest, Completion, Usage
 from debate_arena.domain.prompts import (
     JUDGE_CHAT_MARKER,
     MANIFEST,
+    judge_chat_context,
     judge_chat_system_prompt,
     judge_chat_user,
 )
@@ -92,34 +93,48 @@ class TestPrompts:
         assert "80–300" in system
         assert "«русский»" in system
 
-    def test_user_prompt_has_material_transcript_verdict_history_and_message(self):
+    def test_context_has_material_transcript_and_verdict(self):
         verdict = make_verdict()
-        user = judge_chat_user(
+        context = judge_chat_context(
             "Исходный материал",
             "верен ли вывод?",
             "[Раунд 1] Эмпирик: факты",
             [],
             verdict.model_dump_json(),
-            [("user", "Первый вопрос"), ("judge", "Первый ответ")],
-            "Новое возражение",
-            LANG,
         )
-        for piece in (
-            "Исходный материал",
-            "верен ли вывод?",
-            "[Раунд 1] Эмпирик: факты",
-            verdict.conclusion,
-            "Пользователь: Первый вопрос",
-            "Судья: Первый ответ",
-            "Новое возражение",
-        ):
+        for piece in ("Исходный материал", "верен ли вывод?", "[Раунд 1] Эмпирик: факты"):
+            assert piece in context
+        assert verdict.conclusion in context
+
+    def test_user_prompt_has_history_and_the_new_message_last(self):
+        user = judge_chat_user(
+            [("user", "Первый вопрос"), ("judge", "Первый ответ")], "Новое возражение", LANG
+        )
+        for piece in ("Пользователь: Первый вопрос", "Судья: Первый ответ", "Новое возражение"):
             assert piece in user
         assert user.rindex("Новое возражение") > user.rindex("Первый ответ")
 
-    def test_user_prompt_without_history_and_with_participants(self):
-        user = judge_chat_user("т", None, "транскрипт", DIALOGUE, "{}", [], "вопрос", LANG)
-        assert "Собеседники: Собеседник А, Собеседник Б." in user
-        assert "Пользователь:" not in user.split("вопрос")[0]
+    def test_participants_live_in_the_context_and_no_history_means_no_turns(self):
+        context = judge_chat_context("т", None, "транскрипт", DIALOGUE, "{}")
+        assert "Собеседники: Собеседник А, Собеседник Б." in context
+        assert "Пользователь:" not in judge_chat_user([], "вопрос", LANG).split("вопрос")[0]
+
+
+class TestCaching:
+    async def test_chat_context_is_cached_for_an_hour_and_stable_between_messages(self):
+        # SPEC §4.8: material + transcript + verdict are one cached block; history goes after.
+        repo = InMemoryRepository()
+        analysis_id = await _analysis(repo)
+        provider = FakeProvider(replies=["Первый ответ.", "Второй ответ."])
+        chat = _chat(repo, provider)
+        await chat.ask(analysis_id, "Первый вопрос")
+        await chat.ask(analysis_id, "Второй вопрос")
+        first, second = provider.calls
+        assert first.cache_ttl == second.cache_ttl == "1h"
+        assert first.context == second.context
+        assert "Исходный материал про воду." in first.context
+        assert "Первый вопрос" not in second.context
+        assert "Первый вопрос" in second.user and "Второй вопрос" in second.user
 
 
 class TestAsk:
@@ -148,9 +163,9 @@ class TestAsk:
         assert request.model == "deepseek-chat"
         assert (request.effort, request.max_tokens) == ("low", 2048)
         assert JUDGE_CHAT_MARKER in request.system
-        assert "Исходный материал про воду." in request.user
-        assert "Реплика эмпирика про факты." in request.user
-        assert "Тестовое заключение" in request.user
+        assert "Исходный материал про воду." in request.context
+        assert "Реплика эмпирика про факты." in request.context
+        assert "Тестовое заключение" in request.context
         assert "Вопрос пользователя" in request.user
 
     async def test_previous_exchange_reaches_the_next_prompt(self):
@@ -267,7 +282,7 @@ class TestAnonymization:
         expected = "Собеседник А не прав, а Собеседник Б вы недооценили"
         assert exchange.question.text == expected
         assert expected in provider.calls[0].user
-        assert "Иван" not in provider.calls[0].user
+        assert "Иван" not in provider.calls[0].user + provider.calls[0].context
         assert (await repo.get(analysis_id)).chat[0].text == expected
 
     async def test_legend_ignored_for_text_and_for_unknown_labels(self):

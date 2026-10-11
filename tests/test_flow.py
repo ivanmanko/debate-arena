@@ -13,6 +13,10 @@ from tests.fakes.llm import FakeProvider
 NAMES = [a.name for a in ANALYSTS]
 
 
+async def _noop(event: AnalysisEvent) -> None:
+    return None
+
+
 def _config(rounds: int = 2) -> FlowConfig:
     return FlowConfig(
         rounds=rounds,
@@ -24,6 +28,7 @@ def _config(rounds: int = 2) -> FlowConfig:
         analyst_effort="medium",
         judge_effort="high",
         concurrency=3,
+        cache_ttl="5m",
     )
 
 
@@ -72,14 +77,59 @@ class TestRounds:
             assert "[Раунд 1]" in req.user
             assert "Принимаю:" in req.user
 
-    async def test_each_analyst_gets_its_own_system_prompt_and_config(self):
-        _, _, _, provider = await _run(rounds=1)
-        systems = {req.system for req in provider.calls}
-        assert systems == {a.system_prompt for a in ANALYSTS}
+    async def test_analysts_share_one_cached_prefix_and_differ_by_lens(self):
+        # SPEC §4.8: system + material are byte-identical across every analyst call.
+        _, _, _, provider = await _run(rounds=2)
+        assert len({(req.system, req.context) for req in provider.calls}) == 1
+        assert "Исходный текст." in provider.calls[0].context
+        assert all("Исходный текст." not in req.user for req in provider.calls)
+        for analyst in ANALYSTS:
+            assert sum(req.user.startswith(analyst.lens) for req in provider.calls) == 2
         for req in provider.calls:
             assert req.model == "fake/a"
             assert req.max_tokens == 100
             assert req.effort == "medium"
+            assert req.cache_ttl == "5m"
+
+    async def test_cache_is_prewarmed_once_before_the_parallel_round(self):
+        _, _, _, provider = await _run(rounds=1)
+        assert len(provider.prewarms) == 1
+        warm, first = provider.prewarms[0], provider.calls[0]
+        assert (warm.model, warm.system, warm.context, warm.effort, warm.cache_ttl) == (
+            first.model,
+            first.system,
+            first.context,
+            first.effort,
+            first.cache_ttl,
+        )
+
+    async def test_failed_prewarm_does_not_fail_the_analysis(self):
+        result, _, _, provider = await _run(rounds=1, provider=FakeProvider(fail_prewarm=True))
+        assert result.verdict is not None
+        assert len(provider.calls) == 3
+
+    async def test_no_prewarm_without_caching(self):
+        provider = FakeProvider()
+        flow_config = _config(1)
+        from dataclasses import replace
+
+        flow = AnalysisFlow(
+            text="т",
+            question=None,
+            analysts=ANALYSTS,
+            analyst_provider=provider,
+            judge_provider=provider,
+            config=replace(flow_config, cache_ttl=None),
+            emit=_noop,
+        )
+        await flow.run()
+        assert provider.prewarms == []
+        assert {req.cache_ttl for req in provider.calls} == {None}
+
+    async def test_prewarm_tokens_are_counted_but_not_as_a_call(self):
+        result, _, _, _ = await _run(rounds=1, provider=FakeProvider(prewarm_tokens=50))
+        assert result.calls == 4  # 3 analysts + judge
+        assert result.usage.input_tokens == 3 * 10 + 50  # the fake judge reports no usage
 
     async def test_cross_round_is_sequential_so_later_analysts_see_earlier_ones(self):
         _, _, _, provider = await _run(rounds=2)
@@ -132,15 +182,17 @@ class TestJudge:
         req = provider.structured_calls[0]
         assert req.model == "fake/j" and req.max_tokens == 200 and req.effort == "high"
         assert "[Раунд 1]" in req.user
-        assert "Собеседники:" not in req.user
+        assert "Исходный текст." in req.context
+        assert req.cache_ttl is None  # one call, nothing would read the cache
+        assert "Собеседники:" not in req.context
         assert result.verdict.participants == [] and result.verdict.closest_to_truth is None
 
     async def test_dialogue_mode_threads_participants_to_prompts_and_verdict(self):
         people = ["Иван", "Мария"]
         result, events, _, provider = await _run(rounds=2, participants=people)
         for req in provider.calls:
-            assert "Собеседники: Иван, Мария." in req.user
-        assert "Собеседники: Иван, Мария." in provider.structured_calls[0].user
+            assert "Собеседники: Иван, Мария." in req.context
+        assert "Собеседники: Иван, Мария." in provider.structured_calls[0].context
         assert [p.name for p in result.verdict.participants] == people
         assert result.verdict.closest_to_truth in people
         assert events[0].data["mode"] == "dialogue" and events[0].data["participants"] == people

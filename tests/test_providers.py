@@ -85,7 +85,10 @@ class TestMockProvider:
         replies = set()
         for analyst in ANALYSTS:
             request = ChatRequest(
-                model="m", system=analyst.system_prompt, user="Независимый разбор", max_tokens=1
+                model="m",
+                system=analyst.system_prompt,
+                user=f"{analyst.lens}\n\nНезависимый разбор",
+                max_tokens=1,
             )
             replies.add((await provider.complete(request)).text)
         assert len(replies) == 3
@@ -95,10 +98,21 @@ class TestMockProvider:
         text_result = await provider.complete_structured(_request(), Verdict)
         text_result.value.validate_for([])
         dialogue = await provider.complete_structured(
-            _request("…\nСобеседники: Иван, Мария.\n«««"), Verdict
+            ChatRequest(
+                model="m",
+                system="s",
+                context="Материал — ДИАЛОГ.\nСобеседники: Иван, Мария.\n«««",
+                user="вердикт",
+                max_tokens=1,
+            ),
+            Verdict,
         )
         dialogue.value.validate_for(["Иван", "Мария"])
         assert dialogue.value.closest_to_truth == "Иван"
+
+    async def test_prewarm_is_a_no_op(self):
+        usage = await MockProvider(delay_s=0).prewarm(_request())
+        assert usage.input_tokens == 0
 
 
 class TestDeepSeekProvider:
@@ -163,6 +177,33 @@ class TestDeepSeekProvider:
             await self._provider(handler).complete(
                 ChatRequest(model="deepseek-chat", system="s", user="u", max_tokens=5)
             )
+
+    async def test_context_goes_before_the_task_in_one_user_message(self):
+        seen: dict = {}
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            seen["body"] = json.loads(request.content)
+            return httpx.Response(
+                200,
+                json={
+                    "choices": [{"message": {"content": "ок"}}],
+                    "usage": {"prompt_tokens": 1, "completion_tokens": 1},
+                },
+            )
+
+        request = ChatRequest(
+            model="deepseek-chat",
+            system="sys",
+            context="материал",
+            user="задача",
+            max_tokens=5,
+            cache_ttl="5m",
+        )
+        provider = self._provider(handler)
+        await provider.complete(request)
+        assert seen["body"]["messages"][1] == {"role": "user", "content": "материал\n\nзадача"}
+        # DeepSeek caches repeated prefixes on its own; there is nothing to warm.
+        assert (await provider.prewarm(request)).input_tokens == 0
 
 
 class _StubMessages:
@@ -236,6 +277,108 @@ class TestAnthropicProvider:
         )
         assert result.value is verdict
         assert client.messages.kwargs["output_format"] is Verdict
+
+
+class TestAnthropicCaching:
+    """SPEC §4.8: system + context are the cached prefix; the task follows uncached."""
+
+    def _response(self, **usage):
+        return SimpleNamespace(
+            stop_reason="end_turn",
+            stop_details=None,
+            content=[SimpleNamespace(type="text", text="ок")],
+            usage=SimpleNamespace(input_tokens=10, output_tokens=2, **usage),
+        )
+
+    async def test_context_is_a_separate_block_with_cache_control(self):
+        client = _stub_client(self._response())
+        request = ChatRequest(
+            model="m", system="s", context="материал", user="задача", max_tokens=9, cache_ttl="5m"
+        )
+        await AnthropicProvider(client=client).complete(request)
+        assert client.messages.kwargs["messages"] == [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": "материал", "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": "задача"},
+                ],
+            }
+        ]
+
+    async def test_one_hour_ttl_is_passed_through(self):
+        client = _stub_client(self._response())
+        request = ChatRequest(
+            model="m", system="s", context="материал", user="задача", max_tokens=9, cache_ttl="1h"
+        )
+        await AnthropicProvider(client=client).complete(request)
+        block = client.messages.kwargs["messages"][0]["content"][0]
+        assert block["cache_control"] == {"type": "ephemeral", "ttl": "1h"}
+
+    async def test_uncached_context_has_no_marker(self):
+        client = _stub_client(self._response())
+        request = ChatRequest(
+            model="m", system="s", context="материал", user="задача", max_tokens=9
+        )
+        await AnthropicProvider(client=client).complete(request)
+        blocks = client.messages.kwargs["messages"][0]["content"]
+        assert [b["text"] for b in blocks] == ["материал", "задача"]
+        assert all("cache_control" not in b for b in blocks)
+
+    async def test_usage_counts_cached_tokens_into_the_prompt_size(self):
+        client = _stub_client(
+            self._response(cache_read_input_tokens=900, cache_creation_input_tokens=90)
+        )
+        result = await AnthropicProvider(client=client).complete(
+            ChatRequest(model="m", system="s", user="u", max_tokens=9)
+        )
+        usage = result.usage
+        assert (usage.input_tokens, usage.cache_read_tokens, usage.cache_write_tokens) == (
+            1000,
+            900,
+            90,
+        )
+
+    async def test_prewarm_sends_the_same_prefix_with_zero_max_tokens(self):
+        client = _stub_client(
+            SimpleNamespace(
+                stop_reason="max_tokens",
+                stop_details=None,
+                content=[],
+                usage=SimpleNamespace(
+                    input_tokens=3, output_tokens=0, cache_creation_input_tokens=500
+                ),
+            )
+        )
+        request = ChatRequest(
+            model="m",
+            system="s",
+            context="материал",
+            user="задача",
+            max_tokens=9,
+            effort="medium",
+            cache_ttl="5m",
+        )
+        usage = await AnthropicProvider(client=client).prewarm(request)
+        kwargs = client.messages.kwargs
+        assert kwargs["max_tokens"] == 0
+        assert (kwargs["system"], kwargs["output_config"]) == ("s", {"effort": "medium"})
+        content = kwargs["messages"][0]["content"]
+        assert content[0] == {
+            "type": "text",
+            "text": "материал",
+            "cache_control": {"type": "ephemeral"},
+        }
+        assert content[1]["text"].strip() and content[1]["text"] != "задача"
+        assert usage.cache_write_tokens == 500
+
+    async def test_prewarm_without_cache_sends_nothing(self):
+        client = _stub_client(self._response())
+        usage = await AnthropicProvider(client=client).prewarm(
+            ChatRequest(model="m", system="s", context="материал", user="u", max_tokens=9)
+        )
+        assert client.messages.kwargs is None
+        assert usage.input_tokens == 0
 
 
 class TestAnthropicTruncation:

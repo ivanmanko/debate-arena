@@ -75,7 +75,7 @@ class TestStartAndRun:
         assert (await service.get(analysis_id)).source_text == text
         requests = provider.calls + provider.structured_calls
         assert len(requests) == 7
-        assert all(text in r.user for r in requests)
+        assert all(text in r.context for r in requests)
 
     async def test_explicit_model_is_used_for_analysts_and_judge(self):
         seen: list[str] = []
@@ -187,7 +187,8 @@ class TestDialogueMode:
         assert "Иван" not in record.source_text and "Мария" not in record.source_text
         assert "Иван" not in record.title
         for req in provider.calls + provider.structured_calls:
-            assert "Иван" not in req.user and "Мария" not in req.user
+            prompt = req.context + req.user
+            assert "Иван" not in prompt and "Мария" not in prompt
         assert [p.name for p in record.verdict.participants] == record.participants
 
     async def test_anonymization_can_be_disabled(self):

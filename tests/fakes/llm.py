@@ -58,12 +58,23 @@ class FakeProvider:
         verdict: Verdict | None = None,
         *,
         fail_structured_times: int = 0,
+        fail_prewarm: bool = False,
+        prewarm_tokens: int = 0,
     ) -> None:
         self.replies: deque[str] = deque(replies or [])
         self.verdict = verdict
         self.fail_structured_times = fail_structured_times
         self.calls: list[ChatRequest] = []
         self.structured_calls: list[ChatRequest] = []
+        self.prewarms: list[ChatRequest] = []
+        self.fail_prewarm = fail_prewarm
+        self.prewarm_tokens = prewarm_tokens
+
+    async def prewarm(self, request: ChatRequest) -> Usage:
+        self.prewarms.append(request)
+        if self.fail_prewarm:
+            raise RuntimeError("scripted prewarm failure")
+        return Usage(input_tokens=self.prewarm_tokens)
 
     async def complete(self, request: ChatRequest) -> Completion:
         self.calls.append(request)
@@ -81,5 +92,5 @@ class FakeProvider:
             raise InvalidVerdict("scripted failure")
         from debate_arena.domain.prompts import participants_from_prompt
 
-        value = self.verdict or make_verdict(participants_from_prompt(request.user))
+        value = self.verdict or make_verdict(participants_from_prompt(request.context))
         return StructuredCompletion(value=value, usage=Usage(), raw=value.model_dump_json())
