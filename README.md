@@ -58,6 +58,17 @@ docker compose --profile bot up -d            # плюс Telegram-бот
 gcloud run deploy debate-arena --source . --project ivan-pets --region europe-west1
 ```
 
+Публикация разборов (ADR-006) идёт мимо IAP, через отдельный публичный бакет. Анонимно
+из него можно только читать объект по точному имени: роль `legacyObjectReader` без права
+листинга. Сервисный аккаунт Cloud Run может писать и удалять. Настройка один раз:
+
+```bash
+gcloud storage buckets create gs://ivan-pets-rational-check-shared --project ivan-pets --location europe-west1 --uniform-bucket-level-access
+gcloud storage buckets add-iam-policy-binding gs://ivan-pets-rational-check-shared --member allUsers --role roles/storage.legacyObjectReader
+gcloud storage buckets add-iam-policy-binding gs://ivan-pets-rational-check-shared --member serviceAccount:<SA сервиса> --role roles/storage.objectAdmin
+gcloud run services update debate-arena --project ivan-pets --region europe-west1 --update-env-vars SHARE_BUCKET=ivan-pets-rational-check-shared
+```
+
 ## Конфигурация
 
 Всё через `.env` (см. `.env.example`). Главное:
@@ -71,7 +82,9 @@ gcloud run deploy debate-arena --source . --project ivan-pets --region europe-we
 | `MAX_TEXT_CHARS` | лимит текста | 20 000 |
 | `LANGUAGE` | язык реплик и вердикта | русский |
 | `DATABASE_URL` | SQLAlchemy async URL | локальный SQLite |
-| `PUBLIC_URL` | адрес веба для ссылок из бота | — |
+| `PUBLIC_URL` | адрес веба для ссылок из бота и локальных публикаций | — |
+| `SHARE_BUCKET` | бакет GCS для публикаций; пусто — каталог `SHARE_DIR` | — |
+| `SHARE_DIR` | каталог публикаций без GCS, раздаётся по `/shared/` | `./shared` |
 
 Полный список констант поведения с обоснованием — `SPEC.md` §7.
 
@@ -95,7 +108,12 @@ gcloud run deploy debate-arena --source . --project ivan-pets --region europe-we
   весом доводов и говорит об этом явно («Пересматриваю: …»); на нажим без аргументов не
   уступает. Сохранённый вердикт не переписывается, переписка хранится с разбором и входит в
   Markdown-экспорт. Лимит — 20 сообщений на разбор (`JUDGE_CHAT_MAX_MESSAGES`).
-- История разборов в боковой панели, удаление, ссылка на разбор, копирование в
+- **Публикация**: кнопка «🌐 Опубликовать» под вердиктом собирает статическую страницу
+  (исходный материал, реплики аналитиков, вердикт) и выдаёт ссылку, которая открывается у
+  кого угодно без доступа к приложению. Ссылку нельзя угадать (128 бит), страница не
+  индексируется. Обсуждение с судьёй не публикуется, собеседники остаются под метками.
+  «Снять с публикации» удаляет страницу; удаление разбора тоже её снимает.
+- История разборов в боковой панели, удаление, ссылка на разбор для себя, копирование в
   Markdown, скачивание JSON, «разобрать снова», тёмная тема, мобильная вёрстка.
 
 ## Приватность собеседников
@@ -105,13 +123,15 @@ gcloud run deploy debate-arena --source . --project ivan-pets --region europe-we
 заменяются на метки. Соответствие «метка → имя» возвращается один раз в ответе на запуск
 разбора и хранится только в вашем браузере: кнопка «Показать настоящие имена» подставляет
 их локально. Сообщения судье в чате анонимизируются так же: браузер присылает легенду
-вместе с сообщением, сервер заменяет имена метками и легенду не хранит. Отключается `ANONYMIZE_PARTICIPANTS=false`. Для обычного текста имена не
+вместе с сообщением, сервер заменяет имена метками и легенду не хранит. В публикацию
+легенда не попадает: публичная страница показывает только метки. Отключается `ANONYMIZE_PARTICIPANTS=false`. Для обычного текста имена не
 распознаются (это задача NER, не в scope).
 
 ## API
 
 `POST /api/analyses` → 202 `{id}` · `GET /api/analyses/{id}` · `GET /api/analyses/{id}/events`
-(SSE) · `POST /api/analyses/{id}/chat` (вопрос судье) · `GET /api/analyses` · `DELETE /api/analyses/{id}` · `GET /api/config` ·
+(SSE) · `POST /api/analyses/{id}/chat` (вопрос судье) · `POST` / `DELETE
+/api/analyses/{id}/share` (публикация) · `GET /api/analyses` · `DELETE /api/analyses/{id}` · `GET /api/config` ·
 `GET /health`. Контракт — `SPEC.md` §3, схемы — `interface/api/schemas.py`.
 
 ## Архитектура
@@ -122,13 +142,15 @@ src/debate_arena/
 ├── main.py            FastAPI app, lifespan, раздача фронтенда
 ├── domain/            schemas (Verdict, AnalystSpec), analysts, prompts (Манифест), ports
 ├── application/       flow (раунды + судья), service (фоновые запуски, события, персист)
-├── infrastructure/    llm/ (anthropic, deepseek, mock, factory); db/ (models, session, repo)
-└── interface/         api/ (routes, SSE), web/static/ (index.html, app.js, styles.css), bot/, cli.py
+├── infrastructure/    llm/ (anthropic, deepseek, mock, factory); db/ (models, session, repo);
+│                      share/ (gcs, local — хранилища публикаций)
+└── interface/         api/ (routes, SSE), web/static/ (index.html, app.js, styles.css),
+                       share/ (страница публикации), bot/, cli.py
 ```
 
 Правило: `interface → application → domain ← infrastructure`. Решения — в `docs/adr/`:
 провайдеры напрямую через SDK (001), аналитики и протокол (002), web/SSE (003), слои (004),
-обсуждение вердикта с судьёй (005).
+обсуждение вердикта с судьёй (005), публикация статическим снимком (006).
 
 ## Тесты и линт
 
@@ -166,3 +188,13 @@ uv run ruff check . && uv run ruff format --check src tests
 - **Живой замер чата** — время ответа судьи на Opus 5.5 не измерено; оценка по реплике
   аналитика (18–30 с).
 - **Alembic** — схема создаётся `create_all`; миграции подключить при первом изменении схемы.
+  Новые таблицы (`judge_messages`, `analysis_shares`) `create_all` добавляет сам, а новые
+  колонки в существующих таблицах — уже нет.
+- **Публикация из бота и CLI** — только веб. В боте естественно сделать кнопкой под
+  вердиктом: `ShareService.publish` уже общий.
+- **Срок жизни публичной ссылки** — ссылка живёт, пока её не снимут. Чтобы ограничить:
+  lifecycle-правило бакета или подписанные URL (ADR-006, Revisit when).
+- **Публикация обсуждения с судьёй** — сознательно нет: это личная переписка. Снимок
+  статичный, и новые сообщения в него всё равно не попали бы.
+- **Скачать снимок HTML-файлом** — не сделано, ссылка закрывает задачу; рендер общий,
+  добавить можно одним эндпоинтом.
