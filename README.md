@@ -48,6 +48,16 @@ docker compose up -d --build                  # http://localhost:8000
 docker compose --profile bot up -d            # плюс Telegram-бот
 ```
 
+### Google Cloud Run (проект `ivan-pets`)
+
+Сервис `debate-arena`, вход через IAP, SQLite реплицируется Litestream в
+`gs://ivan-pets-litestream/debate-arena` (`deploy/`), `max-instances 1`. Выкатка нового
+кода сохраняет env, секреты и IAP прошлой ревизии:
+
+```bash
+gcloud run deploy debate-arena --source . --project ivan-pets --region europe-west1
+```
+
 ## Конфигурация
 
 Всё через `.env` (см. `.env.example`). Главное:
