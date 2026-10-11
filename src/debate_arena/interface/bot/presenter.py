@@ -124,6 +124,8 @@ def render_verdict(verdict: Verdict, link: str | None) -> str:
         f"📊 Рациональность материала: <b>{verdict.rationality_score}/100</b> "
         f"· уверенность судьи {verdict.confidence}%",
     ]
+    if verdict.narrative.strip():
+        lines += ["", "<b>Развёрнутое обоснование</b>", esc(verdict.narrative.strip())]
     for title, items in (
         ("✅ Установлено", verdict.established),
         ("🟦 Вероятно", verdict.probable),

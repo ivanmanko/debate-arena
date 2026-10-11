@@ -24,6 +24,8 @@ def _print_verdict(verdict: Verdict) -> None:
     print("\n⚖️  ВЕРДИКТ СУДЬИ")
     print(f"Вопрос: {verdict.core_question}")
     print(f"Заключение: {verdict.conclusion}")
+    if verdict.narrative.strip():
+        print(f"\n{verdict.narrative.strip()}")
     print(
         f"Рациональность материала: {verdict.rationality_score}/100 · "
         f"уверенность судьи: {verdict.confidence}%"

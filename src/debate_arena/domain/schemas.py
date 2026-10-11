@@ -77,7 +77,17 @@ class Verdict(BaseModel):
     """Judge's structured verdict — SPEC §3.3. Seeks the truth, never a winner."""
 
     core_question: str = Field(description="Нейтральная формулировка предмета, без эмоций")
-    conclusion: str = Field(description="То, что ближе всего к истине по итогам разбора")
+    conclusion: str = Field(
+        description="То, что ближе всего к истине по итогам разбора: сам ответ, 2–4 предложения"
+    )
+    narrative: str = Field(
+        default="",
+        description="Развёрнутое обоснование вердикта, 400–800 слов в 4–7 абзацах, разделённых "
+        "пустой строкой: предмет и де-фрейминг; что установлено фактами и почему; граница между "
+        "доказанным и интерпретацией; какие доводы аналитиков оказались решающими и какие отпали; "
+        "в чём остаётся неопределённость; почему именно это ближе всего к истине (в диалоге — по "
+        "каждому собеседнику: что верно, где ошибка)",
+    )
     rationality_score: int = Field(ge=0, le=100, description="Рациональность исходного материала")
     confidence: int = Field(ge=0, le=100, description="Уверенность судьи в заключении")
     established: list[str] = Field(description="Что доказано строго")

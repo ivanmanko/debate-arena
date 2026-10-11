@@ -347,6 +347,11 @@
       el("div", { class: "confidence" }, [el("span", { text: `Уверенность судьи: ${v.confidence}%` }), el("div", { class: "bar" }, [el("i", { style: `width:${v.confidence}%` })])]),
     ]);
     card.append(el("div", { class: "verdict-head" }, [gauge, main]));
+    if (v.narrative && v.narrative.trim()) {
+      const box = el("div", { class: "narrative" }, [el("h3", { text: "Развёрнутое обоснование" })]);
+      for (const para of v.narrative.split(/\n\s*\n/)) if (para.trim()) box.append(el("p", { html: inline(para.trim()) }));
+      card.append(box);
+    }
 
     const col = (cls, title, items) => el("div", { class: `v-col ${cls}` }, [el("h4", { text: title }), items.length ? el("ul", {}, items.map((i) => el("li", { text: i }))) : el("p", { class: "muted small", text: "—" })]);
     card.append(el("div", { class: "v-grid" }, [col("est", "Установлено", v.established), col("prob", "Вероятно", v.probable), col("unc", "Неопределённо", v.uncertain)]));
@@ -420,6 +425,7 @@
     for (const t of d.turns) { if (t.round_no !== round) { round = t.round_no; lines.push(`## Раунд ${round}`, ""); } lines.push(`### ${t.emoji} ${t.analyst}`, "", t.text, ""); }
     if (v) {
       lines.push("## ⚖️ Вердикт судьи", "", `**Вопрос:** ${v.core_question}`, "", `**Ближе всего к истине:** ${v.conclusion}`, "", `Рациональность материала: **${v.rationality_score}/100** · уверенность судьи: ${v.confidence}%`, "");
+      if (v.narrative && v.narrative.trim()) lines.push("### Развёрнутое обоснование", "", v.narrative.trim(), "");
       const list = (t, items) => { lines.push(`### ${t}`, ""); for (const i of items) lines.push(`- ${i}`); if (!items.length) lines.push("—"); lines.push(""); };
       list("Установлено", v.established); list("Вероятно", v.probable); list("Неопределённо", v.uncertain);
       if (v.claims.length) { lines.push("### Утверждения", "", "| Утверждение | Статус | Почему |", "|---|---|---|"); for (const c of v.claims) lines.push(`| ${c.claim} | ${c.status} | ${c.note} |`); lines.push(""); }

@@ -179,6 +179,10 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
 .verdict-main .core { color: var(--text-muted); margin: 0 0 8px; font-style: italic; }
 .verdict-main .conclusion { font-size: 18px; line-height: 1.45; margin: 0; font-weight: 500; }
 .confidence { margin-top: 12px; font-size: 13px; color: var(--text-muted); }
+.narrative { margin-top: 18px; padding: 16px 18px; border-radius: 12px; background: var(--surface-2); font-size: 15.5px; line-height: 1.6; }
+.narrative h3 { margin: 0 0 10px; font-size: 13px; text-transform: uppercase; letter-spacing: .06em; color: var(--text-muted); }
+.narrative p { margin: 0 0 12px; }
+.narrative p:last-child { margin-bottom: 0; }
 .bar { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; margin-top: 4px; }
 .bar > i { display: block; height: 100%; background: var(--judge); border-radius: 999px; }
 
