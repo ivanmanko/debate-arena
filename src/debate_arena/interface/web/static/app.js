@@ -194,7 +194,7 @@
   function finishChips() { for (const n of Object.keys(state.current?.chips || {})) setChip(n, "done"); }
 
   function roundContainer(roundNo, kind) {
-    const rounds = $("[data-rounds]");
+    const rounds = $("[data-turns]");
     let box = $(`[data-round="${roundNo}"]`, rounds);
     if (!box) {
       box = el("div", { class: "round", "data-round": roundNo });

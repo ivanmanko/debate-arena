@@ -80,6 +80,16 @@ class TestMockProvider:
         assert first.text != cross.text
         assert "Принимаю:" in cross.text
 
+    async def test_round_one_replies_differ_per_analyst_lens(self):
+        provider = MockProvider(delay_s=0)
+        replies = set()
+        for analyst in ANALYSTS:
+            request = ChatRequest(
+                model="m", system=analyst.system_prompt, user="Независимый разбор", max_tokens=1
+            )
+            replies.add((await provider.complete(request)).text)
+        assert len(replies) == 3
+
     async def test_structured_returns_verdict_for_all_analysts(self):
         provider = MockProvider()
         result = await provider.complete_structured(_request(), Verdict)
