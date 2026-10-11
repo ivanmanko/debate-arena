@@ -19,6 +19,7 @@ def test_defaults_mirror_spec_section_7():
     assert (s.analyst_effort, s.judge_effort) == ("medium", "high")
     assert s.deepseek_temperature == 0.3
     assert (s.cache_ttl_analysis, s.cache_ttl_chat) == ("5m", "1h")
+    assert s.refusal_fallback is True
     assert (s.judge_chat_effort, s.judge_chat_max_tokens) == ("medium", 6_000)
     assert (s.judge_chat_max_chars, s.judge_chat_max_messages) == (2_000, 20)
     assert s.judge_chat_timeout_s == 180.0

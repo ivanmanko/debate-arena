@@ -59,6 +59,14 @@ class TestFactory:
             parse_model_ref("anthropic/claude-opus-5-5"), _settings(anthropic_api_key="k")
         )
         assert isinstance(provider, AnthropicProvider)
+        assert provider.refusal_fallback is True  # SPEC §7 REFUSAL_FALLBACK
+
+    def test_anthropic_fallback_can_be_turned_off(self):
+        provider = build_provider(
+            parse_model_ref("anthropic/claude-opus-5-5"),
+            _settings(anthropic_api_key="k", refusal_fallback=False),
+        )
+        assert provider.refusal_fallback is False
 
     def test_deepseek_requires_key(self):
         with pytest.raises(ProviderNotConfigured):
@@ -221,7 +229,9 @@ class _StubMessages:
 
 
 def _stub_client(response):
-    return SimpleNamespace(messages=_StubMessages(response))
+    """Plain and beta namespaces share one stub, so ``kwargs`` shows whichever was called."""
+    messages = _StubMessages(response)
+    return SimpleNamespace(messages=messages, beta=SimpleNamespace(messages=messages))
 
 
 class TestAnthropicProvider:
@@ -258,8 +268,10 @@ class TestAnthropicProvider:
             usage=SimpleNamespace(input_tokens=1, output_tokens=0),
         )
         provider = AnthropicProvider(client=_stub_client(response))
-        with pytest.raises(ProviderRefused):
+        with pytest.raises(ProviderRefused) as caught:
             await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=9))
+        assert caught.value.category == "general_harms"
+        assert "general_harms" in str(caught.value)
 
     async def test_structured_uses_parse_and_parsed_output(self):
         verdict = make_verdict()
@@ -379,6 +391,66 @@ class TestAnthropicCaching:
         )
         assert client.messages.kwargs is None
         assert usage.input_tokens == 0
+
+
+class TestAnthropicRefusalFallback:
+    """SPEC §4.9: a declined request is re-run server-side on Anthropic's recommended model."""
+
+    def _response(self, model="claude-opus-5-5", stop_reason="end_turn", category=None):
+        return SimpleNamespace(
+            model=model,
+            stop_reason=stop_reason,
+            stop_details=(
+                SimpleNamespace(category=category, explanation="API integrators: …")
+                if stop_reason == "refusal"
+                else None
+            ),
+            content=[SimpleNamespace(type="text", text="ок")] if stop_reason != "refusal" else [],
+            usage=SimpleNamespace(input_tokens=1, output_tokens=1),
+            parsed_output=make_verdict(),
+        )
+
+    async def test_every_call_opts_into_default_fallbacks(self):
+        client = _stub_client(self._response())
+        provider = AnthropicProvider(client=client, refusal_fallback=True)
+        request = ChatRequest(
+            model="claude-opus-5-5", system="s", context="м", user="u", max_tokens=9, cache_ttl="5m"
+        )
+        for call in (
+            provider.complete(request),
+            provider.complete_structured(request, Verdict),
+            provider.prewarm(request),
+        ):
+            client.messages.kwargs = None
+            await call
+            assert client.messages.kwargs["fallbacks"] == "default"
+            assert client.messages.kwargs["betas"] == ["server-side-fallback-2026-07-01"]
+
+    async def test_without_fallback_the_plain_api_is_used(self):
+        client = _stub_client(self._response())
+        provider = AnthropicProvider(client=client, refusal_fallback=False)
+        await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=9))
+        assert "fallbacks" not in client.messages.kwargs
+        assert "betas" not in client.messages.kwargs
+
+    async def test_reply_from_the_fallback_model_is_logged(self, caplog):
+        client = _stub_client(self._response(model="claude-opus-5"))
+        provider = AnthropicProvider(client=client, refusal_fallback=True)
+        with caplog.at_level("WARNING"):
+            result = await provider.complete(
+                ChatRequest(model="claude-opus-5-5", system="s", user="u", max_tokens=9)
+            )
+        assert result.text == "ок"
+        assert "claude-opus-5-5" in caplog.text and "claude-opus-5" in caplog.text
+
+    async def test_refusal_through_the_whole_chain_says_so(self):
+        client = _stub_client(self._response(stop_reason="refusal", category="bio"))
+        provider = AnthropicProvider(client=client, refusal_fallback=True)
+        with pytest.raises(ProviderRefused) as caught:
+            await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=9))
+        message = str(caught.value)
+        assert "bio" in message and "резервн" in message
+        assert "API integrators" not in message  # integrator-facing text is not for the user
 
 
 class TestAnthropicTruncation:
