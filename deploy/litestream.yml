@@ -1,0 +1,7 @@
+# Litestream 0.3: continuous replication of the SQLite file to object storage (ADR-005).
+# Values come from the environment; see deploy/entrypoint.sh.
+# Replica URL for Google Cloud Storage: gcs://<bucket>/<path>.
+dbs:
+  - path: ${LITESTREAM_DB_PATH}
+    replicas:
+      - url: ${LITESTREAM_REPLICA_URL}
