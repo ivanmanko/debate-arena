@@ -52,27 +52,38 @@ class TestSchema:
 
 
 class TestInvariants:
-    def test_text_mode_requires_no_participants(self):
-        make_verdict().validate_for([])
-        with pytest.raises(InvalidVerdict):
-            make_verdict(PEOPLE).validate_for([])
+    """SPEC §3.3: the mode fixes the shape of ``participants``; the names are the judge's."""
 
-    def test_dialogue_mode_requires_every_participant_once(self):
-        make_verdict(PEOPLE).validate_for(PEOPLE)
+    def test_text_mode_requires_no_participants(self):
+        make_verdict().validate_for("text")
         with pytest.raises(InvalidVerdict):
-            make_verdict(PEOPLE[:1]).validate_for(PEOPLE)
+            make_verdict(PEOPLE).validate_for("text")
+
+    def test_dialogue_mode_requires_two_distinct_participants(self):
+        make_verdict(PEOPLE).validate_for("dialogue")
+        make_verdict(PEOPLE + ["Пётр"]).validate_for("dialogue")
         with pytest.raises(InvalidVerdict):
-            make_verdict(PEOPLE + [PEOPLE[0]]).validate_for(PEOPLE)
+            make_verdict().validate_for("dialogue")
+        with pytest.raises(InvalidVerdict):
+            make_verdict(PEOPLE[:1]).validate_for("dialogue")
+        with pytest.raises(InvalidVerdict):
+            make_verdict(PEOPLE + ["иван"]).validate_for("dialogue")
+
+    def test_auto_mode_accepts_text_or_dialogue_shape(self):
+        make_verdict().validate_for("auto")
+        make_verdict(PEOPLE).validate_for("auto")
+        with pytest.raises(InvalidVerdict):
+            make_verdict(PEOPLE[:1]).validate_for("auto")
 
     def test_closest_to_truth_must_be_a_participant(self):
         with pytest.raises(InvalidVerdict):
-            make_verdict(PEOPLE, closest="Кто-то").validate_for(PEOPLE)
+            make_verdict(PEOPLE, closest="Кто-то").validate_for("dialogue")
         with pytest.raises(InvalidVerdict):
-            make_verdict(PEOPLE, closest=None).validate_for(PEOPLE)
+            make_verdict(PEOPLE, closest=None).validate_for("auto")
         with pytest.raises(InvalidVerdict):
             Verdict.model_validate(
                 make_verdict().model_dump() | {"closest_to_truth": "Иван"}
-            ).validate_for([])
+            ).validate_for("text")
 
     def test_participant_lookup(self):
         verdict = make_verdict(PEOPLE)

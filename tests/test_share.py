@@ -31,9 +31,12 @@ async def _analysis(
     status: str = "finished",
     participants: list[str] | None = None,
     verdict: bool = True,
-    source_text: str = "Исходный материал про воду.",
+    source_text: str | None = None,
 ) -> int:
     names = list(participants or [])
+    # Speakers are named by the verdict; the text carries them as the judge would see them.
+    if source_text is None:
+        source_text = "Исходный материал про воду." + "".join(f"\n{n}: реплика." for n in names)
     analysis_id = await repo.create(
         source_text=source_text,
         question="верен ли вывод?",
@@ -42,7 +45,6 @@ async def _analysis(
         model_judge="anthropic/claude-opus-5-5",
         title="Исходный материал",
         mode="dialogue" if names else "text",
-        participants=names,
     )
     await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "Реплика эмпирика про **факты**.")
     await repo.add_turn(

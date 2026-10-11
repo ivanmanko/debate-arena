@@ -8,13 +8,13 @@ import pytest
 
 from debate_arena.application.chat import JudgeChatService
 from debate_arena.config import Settings
-from debate_arena.domain.dialogue import anonymize_mentions
 from debate_arena.domain.exceptions import (
     AnalysisNotFound,
     ChatUnavailable,
     ProviderError,
     ProviderRefused,
 )
+from debate_arena.domain.names import anonymize_mentions
 from debate_arena.domain.ports import ChatRequest, Completion, Usage
 from debate_arena.domain.prompts import (
     JUDGE_CHAT_MARKER,
@@ -46,15 +46,16 @@ async def _analysis(
     model_judge: str = "anthropic/claude-opus-5-5",
 ) -> int:
     names = list(participants or [])
+    # Hidden names live in the text as labels; the chat trusts only labels found there.
+    source = "Исходный материал про воду." + "".join(f"\n{n}: реплика." for n in names)
     analysis_id = await repo.create(
-        source_text="Исходный материал про воду.",
+        source_text=source,
         question="верен ли вывод?",
         rounds=1,
         model_analyst="anthropic/claude-opus-5-5",
         model_judge=model_judge,
         title="Исходный материал",
         mode="dialogue" if names else "text",
-        participants=names,
     )
     await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "Реплика эмпирика про факты.")
     if verdict:
@@ -99,7 +100,7 @@ class TestPrompts:
             "Исходный материал",
             "верен ли вывод?",
             "[Раунд 1] Эмпирик: факты",
-            [],
+            "text",
             verdict.model_dump_json(),
         )
         for piece in ("Исходный материал", "верен ли вывод?", "[Раунд 1] Эмпирик: факты"):
@@ -114,9 +115,9 @@ class TestPrompts:
             assert piece in user
         assert user.rindex("Новое возражение") > user.rindex("Первый ответ")
 
-    def test_participants_live_in_the_context_and_no_history_means_no_turns(self):
-        context = judge_chat_context("т", None, "транскрипт", DIALOGUE, "{}")
-        assert "Собеседники: Собеседник А, Собеседник Б." in context
+    def test_dialogue_mode_lives_in_the_context_and_no_history_means_no_turns(self):
+        context = judge_chat_context("т", None, "транскрипт", "dialogue", "{}")
+        assert "ДИАЛОГ" in context
         assert "Пользователь:" not in judge_chat_user([], "вопрос", LANG).split("вопрос")[0]
 
 

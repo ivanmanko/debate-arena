@@ -8,7 +8,7 @@ from debate_arena.application.flow import AnalysisFlow, FlowConfig
 from debate_arena.domain.analysts import ANALYSTS
 from debate_arena.domain.events import AnalysisEvent
 from debate_arena.domain.exceptions import InvalidVerdict
-from tests.fakes.llm import FakeProvider
+from tests.fakes.llm import FakeProvider, make_verdict
 
 NAMES = [a.name for a in ANALYSTS]
 
@@ -32,7 +32,9 @@ def _config(rounds: int = 2) -> FlowConfig:
     )
 
 
-async def _run(rounds: int = 2, provider: FakeProvider | None = None, judge=None, participants=()):
+async def _run(
+    rounds: int = 2, provider: FakeProvider | None = None, judge=None, mode="text", labels=()
+):
     provider = provider or FakeProvider()
     judge = judge or provider
     events: list[AnalysisEvent] = []
@@ -57,7 +59,8 @@ async def _run(rounds: int = 2, provider: FakeProvider | None = None, judge=None
         emit=emit,
         persist_turn=persist_turn,
         persist_verdict=persist_verdict,
-        participants=participants,
+        mode=mode,
+        labels=labels,
     )
     result = await flow.run()
     return result, events, persisted, provider
@@ -158,7 +161,7 @@ class TestEvents:
         _, events, _, _ = await _run(rounds=2)
         started = events[0].data
         assert started["rounds"] == 2
-        assert started["mode"] == "text" and started["participants"] == []
+        assert started["mode"] == "text"
         assert [a["name"] for a in started["analysts"]] == NAMES
         assert all(a["emoji"] and a["focus"] for a in started["analysts"])
 
@@ -184,25 +187,33 @@ class TestJudge:
         assert "[Раунд 1]" in req.user
         assert "Исходный текст." in req.context
         assert req.cache_ttl is None  # one call, nothing would read the cache
-        assert "Собеседники:" not in req.context
+        assert "ДИАЛОГ" not in req.context
         assert result.verdict.participants == [] and result.verdict.closest_to_truth is None
 
-    async def test_dialogue_mode_threads_participants_to_prompts_and_verdict(self):
+    async def test_dialogue_mode_reaches_prompts_and_the_judge_names_speakers(self):
         people = ["Иван", "Мария"]
-        result, events, _, provider = await _run(rounds=2, participants=people)
-        for req in provider.calls:
-            assert "Собеседники: Иван, Мария." in req.context
-        assert "Собеседники: Иван, Мария." in provider.structured_calls[0].context
+        judge = FakeProvider(verdict=make_verdict(people))
+        result, events, _, provider = await _run(rounds=2, judge=judge, mode="dialogue")
+        for req in provider.calls + judge.structured_calls:
+            assert "ДИАЛОГ" in req.context
         assert [p.name for p in result.verdict.participants] == people
-        assert result.verdict.closest_to_truth in people
-        assert events[0].data["mode"] == "dialogue" and events[0].data["participants"] == people
+        assert events[0].data["mode"] == "dialogue"
 
-    async def test_dialogue_verdict_missing_a_participant_is_invalid(self):
-        from tests.fakes.llm import make_verdict
-
+    async def test_dialogue_verdict_with_one_speaker_is_invalid(self):
         judge = FakeProvider(verdict=make_verdict(["Иван"]))
         with pytest.raises(InvalidVerdict):
-            await _run(rounds=1, judge=judge, participants=["Иван", "Мария"])
+            await _run(rounds=1, judge=judge, mode="dialogue")
+
+    @pytest.mark.parametrize("people", [[], ["Иван", "Мария"]], ids=["text", "dialogue"])
+    async def test_auto_mode_accepts_either_verdict_shape(self, people):
+        judge = FakeProvider(verdict=make_verdict(people))
+        result, _, _, _ = await _run(rounds=1, judge=judge, mode="auto")
+        assert [p.name for p in result.verdict.participants] == people
+
+    async def test_hidden_name_labels_reach_every_call(self):
+        _, _, _, provider = await _run(rounds=1, mode="auto", labels=["Собеседник А"])
+        for req in provider.calls + provider.structured_calls:
+            assert "заменены метками: Собеседник А" in req.context
 
     async def test_invalid_verdict_is_retried_once(self):
         judge = FakeProvider(fail_structured_times=1)
@@ -218,8 +229,6 @@ class TestJudge:
             await _run(rounds=1, judge=judge)
 
     async def test_text_mode_verdict_with_participants_is_invalid(self):
-        from tests.fakes.llm import make_verdict
-
         judge = FakeProvider(verdict=make_verdict(["Кто-то", "Ещё кто-то"]))
         with pytest.raises(InvalidVerdict):
             await _run(rounds=1, judge=judge)

@@ -23,12 +23,11 @@ async def repo():
     os.unlink(path)
 
 
-async def _create(repo, text="Текст", title="Текст", participants=None) -> int:
+async def _create(repo, text="Текст", title="Текст", mode="text") -> int:
     return await repo.create(
         source_text=text,
         question="вопрос",
-        mode="dialogue" if participants else "text",
-        participants=list(participants or []),
+        mode=mode,
         rounds=2,
         model_analyst="mock/rational",
         model_judge="mock/rational",
@@ -56,13 +55,27 @@ async def test_round_trip_with_turns_and_verdict(repo):
     assert record.mode == "text" and record.participants == []
 
 
-async def test_dialogue_participants_round_trip(repo):
-    analysis_id = await _create(repo, participants=["Иван", "Мария"])
+async def test_verdict_names_the_participants(repo):
+    # ADR-008: participants come from the verdict, not from a parser at creation.
+    analysis_id = await _create(repo, mode="dialogue")
+    assert (await repo.get(analysis_id)).participants == []
     await repo.save_verdict(analysis_id, make_verdict(["Иван", "Мария"]))
     record = await repo.get(analysis_id)
     assert record.mode == "dialogue" and record.participants == ["Иван", "Мария"]
     assert record.verdict.closest_to_truth == "Иван"
     assert (await repo.list(limit=1))[0].mode == "dialogue"
+
+
+@pytest.mark.parametrize(
+    ("names", "resolved"), [(["Иван", "Мария"], "dialogue"), ([], "text")], ids=["dialogue", "text"]
+)
+async def test_auto_mode_is_resolved_by_the_verdict(repo, names, resolved):
+    analysis_id = await _create(repo, mode="auto")
+    assert (await repo.get(analysis_id)).mode == "auto"
+    assert (await repo.list(limit=1))[0].mode == "auto"
+    await repo.save_verdict(analysis_id, make_verdict(names))
+    assert (await repo.get(analysis_id)).mode == resolved
+    assert (await repo.list(limit=1))[0].mode == resolved
 
 
 async def test_get_missing_returns_none(repo):

@@ -8,7 +8,7 @@ from debate_arena.application.service import AnalysisService
 from debate_arena.config import Settings
 from debate_arena.domain.exceptions import AnalysisNotFound, AnalysisRunning, ProviderRefused
 from debate_arena.domain.ports import ChatRequest, Completion, Usage
-from tests.fakes.llm import FakeProvider
+from tests.fakes.llm import FakeProvider, make_verdict
 from tests.fakes.repo import InMemoryRepository
 
 
@@ -135,87 +135,97 @@ class TestStartAndRun:
 
 
 class TestDialogueMode:
-    DIALOGUE = "Иван: Земля плоская.\nМария: Нет, есть фото из космоса.\nИван: Они подделаны."
+    """ADR-008: no parser — the mode goes to the models, the judge names the speakers."""
 
-    async def test_auto_detects_dialogue_and_persists_participants(self):
+    DIALOGUE = "Иван: Земля плоская.\nМария: Нет, есть фото из космоса.\nИван: Они подделаны."
+    LABELS = ["Собеседник А", "Собеседник Б"]
+
+    async def test_auto_becomes_dialogue_when_the_judge_names_speakers(self):
         repo = InMemoryRepository()
-        service = _service(repo=repo)
+        provider = FakeProvider(verdict=make_verdict(["Иван", "Мария"]))
+        service = _service(repo=repo, provider=provider)
+        analysis_id = await service.start(
+            text=self.DIALOGUE, question=None, rounds=1, model=None, mode="auto"
+        )
+        assert (await service.get(analysis_id)).mode == "auto"  # unknown until the verdict
+        await service.wait(analysis_id)
+        record = await service.get(analysis_id)
+        assert record.mode == "dialogue"
+        assert record.participants == ["Иван", "Мария"]
+        events = await _collect(_service(repo=repo), analysis_id)  # restored from the DB
+        assert events[0].data["mode"] == "dialogue"
+        assert events[0].data["participants"] == ["Иван", "Мария"]
+
+    async def test_auto_becomes_text_when_the_judge_names_nobody(self):
+        service = _service()
         analysis_id = await service.start(
             text=self.DIALOGUE, question=None, rounds=1, model=None, mode="auto"
         )
         await service.wait(analysis_id)
         record = await service.get(analysis_id)
-        assert record.mode == "dialogue"
-        assert record.participants == ["Собеседник А", "Собеседник Б"]  # anonymised by default
-        assert [p.name for p in record.verdict.participants] == record.participants
-        assert record.verdict.closest_to_truth in record.participants
-        events = await _collect(service, analysis_id)
-        assert events[0].data["mode"] == "dialogue"
+        assert record.mode == "text" and record.participants == []
 
-    async def test_forced_text_mode_ignores_speakers(self):
-        service = _service()
+    async def test_requested_mode_reaches_the_models_and_is_kept(self):
+        provider = FakeProvider(verdict=make_verdict(["Иван", "Мария"]))
+        service = _service(provider=provider)
         analysis_id = await service.start(
-            text=self.DIALOGUE, question=None, rounds=1, model=None, mode="text"
+            text="монолог", question=None, rounds=1, model=None, mode="dialogue"
+        )
+        await service.wait(analysis_id)
+        assert (await service.get(analysis_id)).mode == "dialogue"
+        assert all("ДИАЛОГ" in req.context for req in provider.calls)
+
+    async def test_dialogue_without_two_speakers_fails_on_the_verdict(self):
+        # SPEC §6 №9b: no 422 up front any more — the judge must name two speakers.
+        service = _service(provider=FakeProvider(verdict=make_verdict()))
+        analysis_id = await service.start(
+            text="монолог", question=None, rounds=1, model=None, mode="dialogue"
         )
         await service.wait(analysis_id)
         record = await service.get(analysis_id)
-        assert record.mode == "text" and record.participants == []
-        assert record.verdict.participants == []
+        assert record.status == "failed" and "participants" in record.error
 
-    async def test_forced_dialogue_without_speakers_is_rejected(self):
-        service = _service()
-        with pytest.raises(ValueError, match="Имя: реплика"):
-            await service.start(
-                text="монолог", question=None, rounds=1, model=None, mode="dialogue"
-            )
-
-    async def test_dialogue_is_anonymized_before_models_and_storage(self):
-        provider = FakeProvider()
+    async def test_hidden_names_never_reach_models_or_storage(self):
+        provider = FakeProvider(verdict=make_verdict(self.LABELS))
         repo = InMemoryRepository()
         service = _service(repo=repo, provider=provider)
         started = await service.start_analysis(
             text="Иван: Мария, ты не права.\nМария: Иван, один случай — не статистика.",
-            question=None,
+            question="Прав ли Иван?",
             rounds=1,
             model=None,
-            mode="auto",
+            hide_names=["Иван", "Мария"],
         )
         assert started.legend == {"Собеседник А": "Иван", "Собеседник Б": "Мария"}
         await service.wait(started.id)
         record = await service.get(started.id)
-        assert record.participants == ["Собеседник А", "Собеседник Б"]
         assert "Иван" not in record.source_text and "Мария" not in record.source_text
-        assert "Иван" not in record.title
+        assert "Иван" not in record.title and record.question == "Прав ли Собеседник А?"
         for req in provider.calls + provider.structured_calls:
             prompt = req.context + req.user
             assert "Иван" not in prompt and "Мария" not in prompt
-        assert [p.name for p in record.verdict.participants] == record.participants
+            assert "заменены метками: Собеседник А, Собеседник Б" in req.context
+        assert record.participants == self.LABELS
 
-    async def test_anonymization_can_be_disabled(self):
-        repo = InMemoryRepository()
-        service = _service(repo=repo, settings=_settings(anonymize_participants=False))
+    async def test_names_pass_as_they_are_without_hide_names(self):
+        provider = FakeProvider()
+        service = _service(provider=provider)
         started = await service.start_analysis(
-            text="Иван: а\nМария: б", question=None, rounds=1, model=None, mode="auto"
-        )
-        assert started.legend == {}
-        assert (await service.get(started.id)).participants == ["Иван", "Мария"]
-
-    async def test_text_mode_has_empty_legend(self):
-        service = _service()
-        started = await service.start_analysis(
-            text="просто текст", question=None, rounds=1, model=None, mode="auto"
+            text=self.DIALOGUE, question=None, rounds=1, model=None
         )
         assert started.legend == {}
         await service.wait(started.id)
+        assert "Иван" in provider.calls[0].context
 
-    async def test_restored_events_carry_mode(self):
-        repo = InMemoryRepository()
-        service = _service(repo=repo)
-        analysis_id = await service.start(text=self.DIALOGUE, question=None, rounds=1, model=None)
-        await service.wait(analysis_id)
-        events = await _collect(_service(repo=repo), analysis_id)
-        assert events[0].data["mode"] == "dialogue"
-        assert events[0].data["participants"] == ["Собеседник А", "Собеседник Б"]
+    @pytest.mark.parametrize(
+        "names",
+        [["И" * 41], [f"Имя{i}" for i in range(21)]],
+        ids=["name-too-long", "too-many-names"],
+    )
+    async def test_hide_names_limits(self, names):
+        service = _service()
+        with pytest.raises(ValueError):
+            await service.start(text="т", question=None, rounds=1, model=None, hide_names=names)
 
 
 class TestEvents:

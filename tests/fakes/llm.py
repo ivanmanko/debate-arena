@@ -7,6 +7,7 @@ from collections.abc import Iterable
 
 from debate_arena.domain.ports import ChatRequest, Completion, StructuredCompletion, Usage
 from debate_arena.domain.schemas import ParticipantAssessment, Verdict
+from debate_arena.infrastructure.llm.mock import guess_participants
 
 
 def make_verdict(
@@ -90,7 +91,6 @@ class FakeProvider:
             from debate_arena.domain.exceptions import InvalidVerdict
 
             raise InvalidVerdict("scripted failure")
-        from debate_arena.domain.prompts import participants_from_prompt
-
-        value = self.verdict or make_verdict(participants_from_prompt(request.context))
+        # Unless scripted, answer like the mock judge: labels or a DIALOGUE marker → dialogue.
+        value = self.verdict or make_verdict(guess_participants(request.context))
         return StructuredCompletion(value=value, usage=Usage(), raw=value.model_dump_json())

@@ -104,19 +104,26 @@ class TestMockProvider:
     async def test_structured_returns_text_or_dialogue_verdict(self):
         provider = MockProvider(delay_s=0)
         text_result = await provider.complete_structured(_request(), Verdict)
-        text_result.value.validate_for([])
-        dialogue = await provider.complete_structured(
+        text_result.value.validate_for("text")
+        labelled = await provider.complete_structured(
             ChatRequest(
                 model="m",
                 system="s",
-                context="Материал — ДИАЛОГ.\nСобеседники: Иван, Мария.\n«««",
+                context="«««\nСобеседник Б: а\nСобеседник А: б\n»»»",
                 user="вердикт",
                 max_tokens=1,
             ),
             Verdict,
         )
-        dialogue.value.validate_for(["Иван", "Мария"])
-        assert dialogue.value.closest_to_truth == "Иван"
+        labelled.value.validate_for("auto")
+        assert [p.name for p in labelled.value.participants] == ["Собеседник Б", "Собеседник А"]
+        marked = await provider.complete_structured(
+            ChatRequest(
+                model="m", system="s", context="Материал — ДИАЛОГ.", user="в", max_tokens=1
+            ),
+            Verdict,
+        )
+        marked.value.validate_for("dialogue")
 
     async def test_prewarm_is_a_no_op(self):
         usage = await MockProvider(delay_s=0).prewarm(_request())

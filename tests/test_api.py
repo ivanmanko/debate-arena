@@ -61,8 +61,8 @@ class TestCreate:
         assert response.status_code == 202
         assert response.json() == {"id": 1, "legend": {}}
 
-    def test_dialogue_returns_legend_and_stores_placeholders(self, client):
-        body = {"text": "Иван: а\nМария: Иван, б", "rounds": 1}
+    def test_hidden_names_return_legend_and_store_labels(self, client):
+        body = {"text": "Иван: а\nМария: Иван, б", "rounds": 1, "hide_names": ["Иван", "Мария"]}
         response = client.post("/api/analyses", json=body)
         assert response.status_code == 202
         assert response.json()["legend"] == {"Собеседник А": "Иван", "Собеседник Б": "Мария"}
@@ -83,8 +83,9 @@ class TestCreate:
             {"text": "x", "model": "openai/gpt"},
             {"text": "x", "model": "anthropic/does-not-exist"},
             {"text": "x", "question": "q" * 501},
-            {"text": "x", "mode": "dialogue"},
             {"text": "x", "mode": "weird"},
+            {"text": "x", "hide_names": ["И" * 41]},
+            {"text": "x", "hide_names": [f"Имя{i}" for i in range(21)]},
         ],
     )
     def test_validation_errors(self, client, body):
@@ -125,13 +126,13 @@ class TestDetailAndEvents:
         assert {t["round_no"] for t in detail["turns"]} == {1, 2}
 
     def test_dialogue_detail(self, client):
-        body = {"text": "Иван: а\nМария: б\nИван: в", "rounds": 1}
+        body = {"text": "Иван: а\nМария: б\nИван: в", "rounds": 1, "mode": "dialogue"}
         analysis_id = client.post("/api/analyses", json=body).json()["id"]
         events = _events(client, analysis_id)
         assert events[0][1]["mode"] == "dialogue"
         detail = client.get(f"/api/analyses/{analysis_id}").json()
         assert detail["mode"] == "dialogue"
-        assert detail["participants"] == ["Собеседник А", "Собеседник Б"]
+        assert len(detail["participants"]) >= 2  # named by the (mock) judge
         assert detail["verdict"]["closest_to_truth"] in detail["participants"]
         assert {p["name"] for p in detail["verdict"]["participants"]} == set(detail["participants"])
         assert client.get("/api/analyses").json()[0]["mode"] == "dialogue"
@@ -196,7 +197,8 @@ class TestChat:
 
     def test_dialogue_legend_anonymizes_question(self, client):
         created = client.post(
-            "/api/analyses", json={"text": "Иван: а\nМария: б\nИван: в", "rounds": 1}
+            "/api/analyses",
+            json={"text": "Иван: а\nМария: б\nИван: в", "rounds": 1, "hide_names": ["Иван"]},
         ).json()
         _events(client, created["id"])
         response = client.post(
@@ -378,6 +380,7 @@ class TestShare:
             "text": "Иван: вода мокрая\nМария: Иван, нет",
             "question": "Кто прав — Иван или Мария?",
             "rounds": 1,
+            "hide_names": ["Иван", "Мария"],
         }
         analysis_id = client.post("/api/analyses", json=body).json()["id"]
         _events(client, analysis_id)

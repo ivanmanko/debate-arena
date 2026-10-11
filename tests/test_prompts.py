@@ -8,7 +8,6 @@ from debate_arena.domain.prompts import (
     cross_round_user,
     judge_system_prompt,
     judge_user,
-    participants_from_prompt,
     round_one_user,
     source_context,
     verdict_json_schema,
@@ -72,7 +71,8 @@ class TestRoundPrompts:
         assert "тезис" in context
 
     def test_context_is_identical_for_identical_input(self):
-        assert source_context("т", "в", ["А", "Б"]) == source_context("т", "в", ["А", "Б"])
+        same = ("т", "в", "dialogue", ["Собеседник А"])
+        assert source_context(*same) == source_context(*same)
 
     def test_cross_round_requires_accept_dispute_refine_blocks(self):
         text = cross_round_user(LENS, "[Раунд 1] Эмпирик: ...", 2, LANG)
@@ -85,17 +85,32 @@ class TestRoundPrompts:
     def test_language_is_injected_everywhere(self):
         assert "English" in round_one_user(LENS, "English")
         assert "English" in cross_round_user(LENS, "x", 2, "English")
-        assert "English" in judge_user("x", [], "English")
+        assert "English" in judge_user("x", "text", "English")
 
-    def test_dialogue_mode_names_participants_and_forbids_winner_framing(self):
-        context = source_context("Иван: а\nМария: б", None, ["Иван", "Мария"])
+    def test_dialogue_mode_marks_the_material_and_asks_for_each_position(self):
+        # ADR-008: no parsed names — the models identify the speakers themselves.
+        context = source_context("**Психолог.** а\n**Автор.** б", None, "dialogue")
         assert "ДИАЛОГ" in context
-        assert "Собеседники: Иван, Мария." in context
-        text = round_one_user(LENS, LANG, participants=["Иван", "Мария"])
+        text = round_one_user(LENS, LANG, mode="dialogue")
         assert "победител" in text.lower()  # explicitly told not to pick one
-        assert "ровно так, как они подписаны" in text
-        assert "Иван, Мария" in cross_round_user(LENS, "x", 2, LANG, participants=["Иван", "Мария"])
-        assert "Собеседники:" not in source_context("t", None)
+        assert "определи собеседников" in text.lower()
+        assert "упомина" in text.lower()  # quoted or mentioned people are not speakers
+        assert "Помни" in cross_round_user(LENS, "x", 2, LANG, mode="dialogue")
+
+    def test_auto_mode_makes_the_dialogue_task_conditional(self):
+        assert "ДИАЛОГ" not in source_context("т", None, "auto")
+        text = round_one_user(LENS, LANG, mode="auto")
+        assert "Если материал — диалог" in text
+        assert "определи собеседников" in text.lower()
+
+    def test_text_mode_has_no_dialogue_task(self):
+        assert "собеседник" not in round_one_user(LENS, LANG, mode="text").lower()
+        assert "ДИАЛОГ" not in source_context("т", None, "text")
+
+    def test_hidden_name_labels_are_announced_in_the_context(self):
+        context = source_context("Собеседник А: а", None, "auto", ["Собеседник А"])
+        assert "заменены метками: Собеседник А" in context
+        assert "заменены метками" not in source_context("т", None, "auto")
 
 
 class TestJudgePrompts:
@@ -112,25 +127,27 @@ class TestJudgePrompts:
         assert "400–800 слов" in system
         assert "3–8 пунктов" in system
         assert "кратко и конкретно" not in system
-        user = judge_user("x", [], LANG)
+        user = judge_user("x", "text", LANG)
         assert "narrative" in user
 
-    def test_judge_user_text_mode_has_transcript_and_no_participants(self):
-        text = judge_user("[Раунд 1] A: ...", [], LANG)
+    def test_judge_user_text_mode_has_transcript_and_empty_participants(self):
+        text = judge_user("[Раунд 1] A: ...", "text", LANG)
         assert "[Раунд 1] A: ..." in text
-        assert "Собеседники:" not in text
-        assert "participants" in text and "closest_to_truth" in text
+        assert "participants — пустой список" in text and "closest_to_truth — null" in text
 
-    def test_judge_user_dialogue_mode_lists_participants(self):
-        text = judge_user("x", ["Иван", "Мария"], LANG)
-        assert "Иван, Мария" in text
-        context = source_context("Иван: а\nМария: б", None, ["Иван", "Мария"])
-        assert participants_from_prompt(context) == ["Иван", "Мария"]
-        assert participants_from_prompt(source_context("t", None)) == []
+    def test_judge_user_dialogue_mode_requires_two_speakers_it_names_itself(self):
+        text = judge_user("x", "dialogue", LANG)
+        assert "не меньше двух" in text
+        assert "ровно как в материале" in text
+
+    def test_judge_user_auto_mode_lets_the_judge_decide(self):
+        text = judge_user("x", "auto", LANG)
+        assert "participants — пустой список" in text
+        assert "не меньше двух" in text
 
     def test_judge_user_embeds_schema_only_when_given(self):
-        without = judge_user("x", [], LANG)
-        with_schema = judge_user("x", [], LANG, json_schema='{"type":"object"}')
+        without = judge_user("x", "text", LANG)
+        with_schema = judge_user("x", "text", LANG, json_schema='{"type":"object"}')
         assert '{"type":"object"}' not in without
         assert '{"type":"object"}' in with_schema
 
