@@ -1,0 +1,120 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Проверка здравого смысла</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Ctext y='.9em' font-size='90'%3E%E2%9A%96%EF%B8%8F%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="/static/styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#/new">
+      <span class="brand-mark">⚖️</span>
+      <span class="brand-text">
+        <span class="brand-title">Проверка здравого смысла</span>
+        <span class="brand-sub">три рациональных аналитика и судья</span>
+      </span>
+    </a>
+    <div class="topbar-actions">
+      <span id="mock-badge" class="badge badge-warn hidden" title="Ключи провайдеров не заданы — ответы заглушки">mock</span>
+      <button id="btn-new" class="btn btn-primary" type="button">+ Новый разбор</button>
+      <button id="btn-theme" class="btn btn-ghost" type="button" title="Тема">◐</button>
+      <button id="btn-sidebar" class="btn btn-ghost only-mobile" type="button" title="История">☰</button>
+    </div>
+  </header>
+
+  <div class="layout">
+    <aside id="sidebar" class="sidebar">
+      <div class="sidebar-head">
+        <h2>История</h2>
+        <span id="history-count" class="muted"></span>
+      </div>
+      <ul id="history" class="history"></ul>
+      <p id="history-empty" class="muted small hidden">Пока ни одного разбора.</p>
+    </aside>
+
+    <main class="main">
+      <section id="view-new" class="view">
+        <div id="mock-banner" class="notice hidden">
+          Режим без ключей: аналитики отвечают заглушками. Чтобы включить настоящие модели,
+          впишите <code>ANTHROPIC_API_KEY</code> (или <code>DEEPSEEK_API_KEY</code>) в <code>.env</code> и перезапустите.
+        </div>
+        <form id="compose" class="card compose">
+          <label class="field">
+            <span class="label">Текст для разбора</span>
+            <textarea id="text" rows="9" placeholder="Вставьте пост, статью, аргумент или тезис. Аналитики разберут его по Манифесту здравого смысла: факты против интерпретаций, бремя доказывания, бритва Оккама, уловки, сильнейшая версия…" required></textarea>
+            <span class="counter"><span id="counter">0</span> / <span id="counter-max">20000</span></span>
+          </label>
+          <label class="field">
+            <span class="label">Что именно проверить <span class="muted">(необязательно)</span></span>
+            <input id="question" type="text" maxlength="500" placeholder="Например: верен ли главный вывод автора?">
+          </label>
+          <div class="compose-row">
+            <div class="field">
+              <span class="label">Глубина</span>
+              <div id="rounds" class="segmented" role="radiogroup">
+                <button type="button" data-rounds="1" title="Только независимый разбор + судья">1 раунд</button>
+                <button type="button" data-rounds="2" class="active" title="Независимый разбор + перекрёстная проверка">2 раунда</button>
+                <button type="button" data-rounds="3" title="Две перекрёстные проверки">3 раунда</button>
+              </div>
+            </div>
+            <label class="field">
+              <span class="label">Модель</span>
+              <select id="model"></select>
+            </label>
+            <div class="field field-submit">
+              <button id="submit" class="btn btn-primary btn-lg" type="submit">Разобрать</button>
+              <span class="hint">⌘/Ctrl + Enter</span>
+            </div>
+          </div>
+          <p id="compose-error" class="error hidden"></p>
+        </form>
+
+        <section class="how">
+          <h3>Как это устроено</h3>
+          <div id="analyst-cards" class="analyst-cards"></div>
+          <ol class="steps">
+            <li><b>Независимый разбор.</b> Каждый аналитик разбирает текст, не видя коллег — чтобы не якориться на чужом ответе.</li>
+            <li><b>Перекрёстная проверка.</b> Аналитики читают друг друга: явно принимают рациональные доводы, оспаривают ошибки, уточняют позицию.</li>
+            <li><b>Вердикт судьи.</b> Что доказано, что вероятно, что непроверяемо, какие уловки найдены — и что самое рациональное.</li>
+          </ol>
+        </section>
+      </section>
+
+      <section id="view-analysis" class="view hidden">
+        <div id="analysis-root"></div>
+      </section>
+    </main>
+  </div>
+
+  <div id="toast" class="toast hidden"></div>
+
+  <template id="tpl-analysis">
+    <div class="analysis">
+      <div class="card source">
+        <div class="source-head">
+          <div>
+            <div class="eyebrow">Разбор <span data-id></span> · <span data-date></span></div>
+            <h2 class="source-title" data-title></h2>
+          </div>
+          <span class="status" data-status></span>
+        </div>
+        <div class="meta" data-meta></div>
+        <details class="source-text">
+          <summary>Исходный текст</summary>
+          <p data-text></p>
+          <p class="question hidden" data-question></p>
+        </details>
+      </div>
+
+      <div class="card progress" data-progress></div>
+      <div class="notice notice-error hidden" data-error></div>
+      <div class="rounds" data-rounds></div>
+      <div class="verdict-slot" data-verdict></div>
+    </div>
+  </template>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

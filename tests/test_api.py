@@ -161,3 +161,12 @@ class TestConfigAndHealth:
         assert body["status"] == "ok"
         assert body["mock"] is True
         assert body["version"]
+
+
+class TestFrontend:
+    def test_index_and_static_are_served(self, client):
+        index = client.get("/")
+        assert index.status_code == 200
+        assert "Проверка здравого смысла" in index.text
+        assert client.get("/static/app.js").status_code == 200
+        assert client.get("/static/styles.css").status_code == 200
