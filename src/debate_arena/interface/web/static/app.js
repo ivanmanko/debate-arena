@@ -1,4 +1,4 @@
-/* Rational Check — vanilla JS client. Routes: #/new, #/a/<id>. Live updates via SSE; judge chat via POST. */
+/* Rational Check — vanilla JS client. Routes: #/new, #/a/<id>. Live updates via SSE; judge chat and publishing via POST. */
 (() => {
   "use strict";
 
@@ -100,7 +100,7 @@
       li.append(el("a", { href: `#/a/${item.id}` }, [el("span", { class: "h-title", text: item.title }), meta]));
       li.append(el("button", { class: "h-del", title: "Удалить", text: "✕", onclick: async (e) => {
         e.preventDefault();
-        if (!confirm("Удалить этот разбор?")) return;
+        if (!confirm("Удалить этот разбор? Если он опубликован, публичная ссылка тоже перестанет открываться.")) return;
         try { await api.del(`/api/analyses/${item.id}`); toast("Удалено"); if (state.current?.id === item.id) location.hash = "#/new"; await loadHistory(); }
         catch (err) { toast(err.message); }
       } }));
@@ -174,6 +174,7 @@
     for (const t of detail.turns) addTurn(t);
     if (detail.verdict) renderVerdict(detail.verdict, detail);
     renderChat(detail);
+    renderShare(detail);
     if (detail.error) showError(detail.error);
     if (detail.status === "running") subscribe(id);
     else finishChips();
@@ -328,7 +329,7 @@
     es.addEventListener("done", async (e) => {
       const d = JSON.parse(e.data);
       closeStream();
-      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); renderChat(detail); applyLegend(); } catch (_) { /* ignore */ }
+      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); renderChat(detail); renderShare(detail); applyLegend(); } catch (_) { /* ignore */ }
       finishChips();
       await loadHistory();
     });
@@ -404,11 +405,57 @@
       el("span", { class: "stats", "data-stats": "", text: detail?.duration_ms ? `Время разбора: ${fmtMs(detail.duration_ms)}` : "" }),
       el("button", { class: "btn btn-sm", text: "Копировать Markdown", onclick: () => copyMarkdown() }),
       el("button", { class: "btn btn-sm", text: "Скачать JSON", onclick: () => downloadJson() }),
-      el("button", { class: "btn btn-sm", text: "Ссылка", onclick: () => { navigator.clipboard?.writeText(location.href).then(() => toast("Ссылка скопирована")); } }),
+      el("button", { class: "btn btn-sm", text: "Ссылка для себя", title: "Ссылка на разбор в этом приложении — откроется только у тех, у кого есть доступ к нему", onclick: () => { navigator.clipboard?.writeText(location.href).then(() => toast("Ссылка скопирована")); } }),
       el("button", { class: "btn btn-sm", text: "Разобрать снова", onclick: () => rerun() }),
     ]);
-    card.append(foot);
+    card.append(foot, el("div", { class: "share-slot", "data-share": "" }));
     slot.append(card);
+  }
+
+  // ---------- Publishing (SPEC §3.6a, §4.7) ----------
+  function renderShare(d) {
+    const slot = $("[data-share]"); if (!slot) return; slot.innerHTML = "";
+    if (d.status !== "finished" || !d.verdict) return;
+    const err = el("p", { class: "error hidden" });
+    const fail = (ex) => { err.textContent = ex.message; err.classList.remove("hidden"); };
+    const what = "Публикуются исходный материал, реплики аналитиков и вердикт. Обсуждение с судьёй не публикуется" + (d.mode === "dialogue" ? ", собеседники остаются под метками." : ".");
+    const local = state.config?.share_backend === "local" ? " Снимок лежит на этом сервере: ссылка откроется у других, только если сервер им доступен." : "";
+    if (!d.share) {
+      const btn = el("button", { class: "btn btn-primary btn-sm", type: "button", text: "🌐 Опубликовать" });
+      btn.onclick = async () => {
+        btn.disabled = true; err.classList.add("hidden");
+        try { d.share = await api.post(`/api/analyses/${d.id}/share`, {}); renderShare(d); copyShare(d.share); }
+        catch (ex) { fail(ex); btn.disabled = false; }
+      };
+      slot.append(el("div", { class: "share" }, [
+        el("div", { class: "share-row" }, [btn, el("span", { class: "muted small", text: "Страница по ссылке откроется у любого, без доступа к приложению." })]),
+        el("p", { class: "muted small", text: what + local }), err,
+      ]));
+      return;
+    }
+    const url = absoluteUrl(d.share.url);
+    const input = el("input", { type: "text", readonly: "", value: url, "aria-label": "Публичная ссылка", onfocus: (e) => e.target.select() });
+    const off = el("button", { class: "btn btn-sm btn-ghost", type: "button", text: "Снять с публикации" });
+    off.onclick = async () => {
+      if (!confirm("Снять с публикации? Ссылка перестанет открываться.")) return;
+      off.disabled = true; err.classList.add("hidden");
+      try { await api.del(`/api/analyses/${d.id}/share`); d.share = null; renderShare(d); toast("Снято с публикации"); }
+      catch (ex) { fail(ex); off.disabled = false; }
+    };
+    slot.append(el("div", { class: "share published" }, [
+      el("div", { class: "share-head" }, [el("span", { class: "badge badge-ok", text: "опубликовано" }), el("span", { class: "muted small", text: fmtDate(d.share.created_at) })]),
+      el("div", { class: "share-row" }, [
+        input,
+        el("button", { class: "btn btn-sm", type: "button", text: "Копировать", onclick: () => copyShare(d.share) }),
+        el("a", { class: "btn btn-sm", href: url, target: "_blank", rel: "noopener noreferrer", text: "Открыть" }),
+        off,
+      ]),
+      el("p", { class: "muted small", text: what + local }), err,
+    ]));
+  }
+  const absoluteUrl = (url) => new URL(url, location.href).href;
+  function copyShare(share) {
+    navigator.clipboard?.writeText(absoluteUrl(share.url)).then(() => toast("Публичная ссылка скопирована"), () => toast("Ссылка готова — скопируйте её из поля"));
   }
   // ---------- Judge chat (SPEC §4.6) ----------
   function chatMessage(m) {

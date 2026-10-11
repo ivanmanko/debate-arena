@@ -69,6 +69,7 @@ code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); 
 .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; }
 .badge-warn { color: var(--warn); border-color: var(--warn); }
 .badge-info { color: var(--info); border-color: var(--info); }
+.badge-ok { color: var(--ok); border-color: var(--ok); }
 .legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 
 /* Layout */
@@ -232,6 +233,15 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
 .score-card .sc-note { margin: 10px 0 0; font-size: 13px; font-style: italic; }
 .v-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 .v-foot .stats { flex: 1 1 100%; font-size: 13px; color: var(--text-muted); }
+
+/* Publishing */
+.share { margin-top: 14px; padding: 12px 14px; border-radius: 12px; background: var(--surface-2); display: flex; flex-direction: column; gap: 8px; }
+.share.published { border: 1px solid color-mix(in srgb, var(--ok) 40%, var(--border)); }
+.share p { margin: 0; }
+.share-head { display: flex; align-items: center; gap: 10px; }
+.share-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.share-row input { flex: 1 1 260px; min-width: 0; padding: 7px 10px; font-family: var(--mono); font-size: 13px; background: var(--surface); }
+.share-row a.btn { display: inline-block; }
 
 /* Judge chat */
 .chat h3 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--judge); }
