@@ -294,13 +294,7 @@ class AnalysisFlow:
         call: bool = True,
     ) -> None:
         self._calls += call
-        total = self._usage
-        self._usage = Usage(
-            input_tokens=total.input_tokens + usage.input_tokens,
-            output_tokens=total.output_tokens + usage.output_tokens,
-            cache_read_tokens=total.cache_read_tokens + usage.cache_read_tokens,
-            cache_write_tokens=total.cache_write_tokens + usage.cache_write_tokens,
-        )
+        self._usage += usage
         logger.info(
             "llm.call provider=%s model=%s role=%s analysis=%s round=%s ms=%d in=%d out=%d "
             "cache_read=%d cache_write=%d",

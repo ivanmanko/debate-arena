@@ -61,6 +61,7 @@ def analyst_system_prompt(language: str) -> str:
 
 
 def analyst_lens(name: str) -> str:
+    """The analyst's lens — opens each of its tasks, after the cached material."""
     return _LENSES[name]
 
 
