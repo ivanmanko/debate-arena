@@ -7,6 +7,9 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
+from .records import AnalysisRecord, AnalysisSummary
+from .schemas import Verdict
+
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
@@ -48,3 +51,36 @@ class ChatProvider(Protocol):
     async def complete_structured(
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]: ...
+
+
+class AnalysisRepository(Protocol):
+    """Storage port for analyses (SPEC §2). Implemented by infrastructure.db and test fakes."""
+
+    async def create(
+        self,
+        *,
+        source_text: str,
+        question: str | None,
+        rounds: int,
+        model_analyst: str,
+        model_judge: str,
+        title: str,
+    ) -> int: ...
+
+    async def add_turn(
+        self, analysis_id: int, round_no: int, analyst: str, emoji: str, text: str
+    ) -> None: ...
+
+    async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None: ...
+
+    async def finish(
+        self, analysis_id: int, status: str, error: str | None, duration_ms: int
+    ) -> None: ...
+
+    async def get(self, analysis_id: int) -> AnalysisRecord | None: ...
+
+    async def list(self, limit: int) -> list[AnalysisSummary]: ...
+
+    async def delete(self, analysis_id: int) -> bool: ...
+
+    async def mark_interrupted(self) -> int: ...

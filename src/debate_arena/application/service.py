@@ -1,0 +1,295 @@
+"""AnalysisService — starts analyses in the background, fans events out to subscribers,
+persists facts through the repository port (ADR-003).
+
+Live runs keep their event list in memory (``_Run``); finished analyses that are no
+longer in memory are replayed from the repository (SPEC §3.4).
+"""
+
+from __future__ import annotations
+
+import asyncio
+import logging
+import re
+import time
+from collections.abc import AsyncIterator, Callable
+from dataclasses import dataclass, field
+
+from ..config import Settings
+from ..domain.analysts import build_analysts
+from ..domain.events import AnalysisEvent
+from ..domain.exceptions import (
+    AnalysisNotFound,
+    AnalysisRunning,
+    InvalidVerdict,
+    ProviderRefused,
+)
+from ..domain.ports import AnalysisRepository, ChatProvider
+from ..domain.records import AnalysisRecord, AnalysisSummary
+from ..domain.schemas import AnalystSpec, Verdict, parse_model_ref
+from .flow import JUDGE_EMOJI, JUDGE_NAME, AnalysisFlow, FlowConfig
+
+logger = logging.getLogger(__name__)
+
+ProviderFactory = Callable[[str], ChatProvider]
+
+# Finished runs kept in memory for fast SSE replay before falling back to the DB.
+_FINISHED_RUNS_KEPT = 50
+_WS_RE = re.compile(r"\s+")
+
+
+@dataclass
+class _Run:
+    events: list[AnalysisEvent] = field(default_factory=list)
+    done: bool = False
+    condition: asyncio.Condition = field(default_factory=asyncio.Condition)
+    task: asyncio.Task | None = None
+
+
+class AnalysisService:
+    def __init__(
+        self,
+        *,
+        repo: AnalysisRepository,
+        provider_factory: ProviderFactory,
+        settings: Settings,
+    ) -> None:
+        self._repo = repo
+        self._providers = provider_factory
+        self._settings = settings
+        self._analysts = build_analysts(settings.language)
+        self._runs: dict[int, _Run] = {}
+
+    @property
+    def analysts(self) -> tuple[AnalystSpec, ...]:
+        return self._analysts
+
+    # --- commands ---------------------------------------------------------------
+
+    async def start(
+        self, *, text: str, question: str | None, rounds: int | None, model: str | None
+    ) -> int:
+        s = self._settings
+        text = text.strip()
+        if not text:
+            raise ValueError("text must not be empty")
+        if len(text) > s.max_text_chars:
+            raise ValueError(f"text is longer than {s.max_text_chars} characters")
+        question = (question or "").strip() or None
+        if question and len(question) > s.max_question_chars:
+            raise ValueError(f"question is longer than {s.max_question_chars} characters")
+        rounds = s.default_rounds if rounds is None else rounds
+        if not 1 <= rounds <= s.max_rounds:
+            raise ValueError(f"rounds must be within 1..{s.max_rounds}")
+        if model:
+            parse_model_ref(model)  # raises ValueError on malformed / unknown provider
+        model_analyst = model or s.effective_model_analyst
+        model_judge = model or s.effective_model_judge
+        analyst_provider = self._providers(model_analyst)
+        judge_provider = self._providers(model_judge)
+
+        analysis_id = await self._repo.create(
+            source_text=text,
+            question=question,
+            rounds=rounds,
+            model_analyst=model_analyst,
+            model_judge=model_judge,
+            title=self._title(text),
+        )
+        self._evict_finished()
+        run = _Run()
+        self._runs[analysis_id] = run
+        flow = AnalysisFlow(
+            text=text,
+            question=question,
+            analysts=self._analysts,
+            analyst_provider=analyst_provider,
+            judge_provider=judge_provider,
+            config=FlowConfig(
+                rounds=rounds,
+                language=s.language,
+                analyst_model=parse_model_ref(model_analyst).model,
+                judge_model=parse_model_ref(model_judge).model,
+                turn_max_tokens=s.turn_max_tokens,
+                judge_max_tokens=s.judge_max_tokens,
+                analyst_effort=s.analyst_effort,
+                judge_effort=s.judge_effort,
+                concurrency=s.llm_concurrency,
+            ),
+            emit=lambda event: self._publish(run, event),
+            persist_turn=lambda round_no, analyst, text: self._repo.add_turn(
+                analysis_id, round_no, analyst.name, analyst.emoji, text
+            ),
+            persist_verdict=lambda verdict: self._repo.save_verdict(analysis_id, verdict),
+            analysis_id=analysis_id,
+        )
+        run.task = asyncio.create_task(self._execute(analysis_id, run, flow))
+        return analysis_id
+
+    async def wait(self, analysis_id: int) -> None:
+        run = self._runs.get(analysis_id)
+        if run and run.task:
+            await run.task
+
+    async def delete(self, analysis_id: int) -> bool:
+        run = self._runs.get(analysis_id)
+        if run and not run.done:
+            raise AnalysisRunning(f"analysis {analysis_id} is still running")
+        self._runs.pop(analysis_id, None)
+        if not await self._repo.delete(analysis_id):
+            raise AnalysisNotFound(str(analysis_id))
+        return True
+
+    async def recover_interrupted(self) -> int:
+        """Mark analyses left ``running`` by a previous process as failed (SPEC §6 №5)."""
+        count = await self._repo.mark_interrupted()
+        if count:
+            logger.warning("marked %d interrupted analyses as failed", count)
+        return count
+
+    # --- queries ----------------------------------------------------------------
+
+    async def get(self, analysis_id: int) -> AnalysisRecord:
+        record = await self._repo.get(analysis_id)
+        if record is None:
+            raise AnalysisNotFound(str(analysis_id))
+        return record
+
+    async def list(self, limit: int | None = None) -> list[AnalysisSummary]:
+        return await self._repo.list(
+            min(limit or self._settings.history_limit, self._settings.history_limit)
+        )
+
+    def is_running(self, analysis_id: int) -> bool:
+        run = self._runs.get(analysis_id)
+        return bool(run and not run.done)
+
+    async def subscribe(self, analysis_id: int) -> AsyncIterator[AnalysisEvent]:
+        """Replay what already happened, then stream live events until ``done``."""
+        run = self._runs.get(analysis_id)
+        if run is None:
+            for event in await self._events_from_repo(analysis_id):
+                yield event
+            return
+        index = 0
+        while True:
+            async with run.condition:
+                while index >= len(run.events) and not run.done:
+                    await run.condition.wait()
+                batch = run.events[index:]
+                index = len(run.events)
+                done = run.done
+            for event in batch:
+                yield event
+            if done and index >= len(run.events):
+                return
+
+    # --- internals --------------------------------------------------------------
+
+    async def _execute(self, analysis_id: int, run: _Run, flow: AnalysisFlow) -> None:
+        started = time.monotonic()
+        status, error, calls, usage_in, usage_out = "finished", None, 0, 0, 0
+        try:
+            result = await flow.run()
+            calls, usage_in, usage_out = (
+                result.calls,
+                result.usage.input_tokens,
+                result.usage.output_tokens,
+            )
+        except ProviderRefused as exc:
+            status, error = "failed", str(exc)
+        except InvalidVerdict as exc:
+            status, error = "failed", str(exc)
+        except Exception as exc:  # noqa: BLE001 — any provider/network failure ends the run
+            logger.exception("analysis %s failed", analysis_id)
+            status, error = "failed", f"{type(exc).__name__}: {exc}"
+        duration_ms = int((time.monotonic() - started) * 1000)
+        if error:
+            await self._publish(run, AnalysisEvent("error", {"message": error}))
+        try:
+            await self._repo.finish(analysis_id, status, error, duration_ms)
+        finally:
+            logger.info(
+                "analysis.done id=%s status=%s ms=%d calls=%d",
+                analysis_id,
+                status,
+                duration_ms,
+                calls,
+            )
+            await self._publish(
+                run,
+                AnalysisEvent(
+                    "done",
+                    {
+                        "status": status,
+                        "duration_ms": duration_ms,
+                        "calls": calls,
+                        "input_tokens": usage_in,
+                        "output_tokens": usage_out,
+                    },
+                ),
+            )
+            async with run.condition:
+                run.done = True
+                run.condition.notify_all()
+
+    @staticmethod
+    async def _publish(run: _Run, event: AnalysisEvent) -> None:
+        async with run.condition:
+            run.events.append(event)
+            run.condition.notify_all()
+
+    async def _events_from_repo(self, analysis_id: int) -> list[AnalysisEvent]:
+        record = await self.get(analysis_id)
+        events = [
+            AnalysisEvent(
+                "started",
+                {
+                    "rounds": record.rounds,
+                    "analysts": [
+                        {"name": a.name, "emoji": a.emoji, "focus": a.focus} for a in self._analysts
+                    ],
+                    "restored": True,
+                },
+            )
+        ]
+        current_round = 0
+        for turn in record.turns:
+            if turn.round_no != current_round:
+                current_round = turn.round_no
+                kind = "Независимый разбор" if current_round == 1 else "Перекрёстная проверка"
+                events.append(AnalysisEvent("round", {"round_no": current_round, "kind": kind}))
+            events.append(
+                AnalysisEvent(
+                    "turn",
+                    {
+                        "round_no": turn.round_no,
+                        "analyst": turn.analyst,
+                        "emoji": turn.emoji,
+                        "text": turn.text,
+                    },
+                )
+            )
+        if record.verdict is not None:
+            events.append(AnalysisEvent("verdict", record.verdict.model_dump()))
+        if record.error:
+            events.append(AnalysisEvent("error", {"message": record.error}))
+        events.append(
+            AnalysisEvent(
+                "done",
+                {"status": record.status, "duration_ms": record.duration_ms, "calls": None},
+            )
+        )
+        return events
+
+    def _title(self, text: str) -> str:
+        collapsed = _WS_RE.sub(" ", text).strip()
+        limit = self._settings.title_chars
+        return collapsed if len(collapsed) <= limit else collapsed[: limit - 1] + "…"
+
+    def _evict_finished(self) -> None:
+        finished = [i for i, r in self._runs.items() if r.done]
+        for analysis_id in finished[: max(0, len(finished) - _FINISHED_RUNS_KEPT)]:
+            self._runs.pop(analysis_id, None)
+
+
+__all__ = ["AnalysisService", "JUDGE_EMOJI", "JUDGE_NAME", "Verdict"]
