@@ -1,4 +1,4 @@
-/* Rational Check — vanilla JS client. Routes: #/new, #/a/<id>. Live updates via SSE. */
+/* Rational Check — vanilla JS client. Routes: #/new, #/a/<id>. Live updates via SSE; judge chat via POST. */
 (() => {
   "use strict";
 
@@ -173,6 +173,7 @@
     root.append(buildAnalysis(detail));
     for (const t of detail.turns) addTurn(t);
     if (detail.verdict) renderVerdict(detail.verdict, detail);
+    renderChat(detail);
     if (detail.error) showError(detail.error);
     if (detail.status === "running") subscribe(id);
     else finishChips();
@@ -327,7 +328,7 @@
     es.addEventListener("done", async (e) => {
       const d = JSON.parse(e.data);
       closeStream();
-      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); } catch (_) { /* ignore */ }
+      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); renderChat(detail); applyLegend(); } catch (_) { /* ignore */ }
       finishChips();
       await loadHistory();
     });
@@ -409,6 +410,58 @@
     card.append(foot);
     slot.append(card);
   }
+  // ---------- Judge chat (SPEC §4.6) ----------
+  function chatMessage(m) {
+    const node = el("div", { class: `msg ${m.role}` }, [el("div", { class: "msg-who", text: m.role === "judge" ? "⚖️ Судья" : "Вы" })]);
+    if (m.role === "judge") for (const para of m.text.split(/\n\s*\n/)) { if (para.trim()) node.append(el("p", { html: inline(para.trim()) })); }
+    else node.append(el("p", { text: m.text }));
+    return node;
+  }
+  function renderChat(d) {
+    const slot = $("[data-chat]"); if (!slot) return; slot.innerHTML = "";
+    if (d.status !== "finished" || !d.verdict) return;
+    const max = state.config?.chat_max_messages ?? 20;
+    const maxChars = state.config?.chat_max_chars ?? 2000;
+    const log = el("div", { class: "chat-log" }, d.chat.map(chatMessage));
+    const input = el("textarea", { rows: "3", maxlength: String(maxChars), placeholder: "Спросите, почему судья так решил, или оспорьте вывод доводом…" });
+    const left = el("span", { class: "muted small" });
+    const send = el("button", { class: "btn btn-primary", type: "submit", text: "Спросить судью" });
+    const err = el("p", { class: "error hidden" });
+    const form = el("form", { class: "chat-form" }, [input, el("div", { class: "chat-actions" }, [left, el("span", { class: "hint", text: "⌘/Ctrl + Enter" }), send]), err]);
+    const used = () => d.chat.filter((m) => m.role === "user").length;
+    const refresh = () => {
+      const rest = max - used();
+      left.textContent = rest > 0 ? `Осталось сообщений: ${rest}` : "Лимит сообщений исчерпан";
+      input.disabled = send.disabled = rest <= 0;
+    };
+    input.addEventListener("keydown", (e) => { if ((e.metaKey || e.ctrlKey) && e.key === "Enter") { e.preventDefault(); form.requestSubmit(); } });
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const text = input.value.trim(); if (!text) return;
+      err.classList.add("hidden");
+      const pending = chatMessage({ role: "user", text });
+      const typing = el("div", { class: "msg judge typing" }, [el("div", { class: "msg-who", text: "⚖️ Судья думает…" }), el("div", { class: "skeleton", style: "width:80%" }), el("div", { class: "skeleton", style: "width:55%" })]);
+      log.append(pending, typing); input.value = ""; input.disabled = send.disabled = true;
+      typing.scrollIntoView({ behavior: "smooth", block: "nearest" });
+      try {
+        const legend = state.current?.legend || {};
+        const { question, reply } = await api.post(`/api/analyses/${d.id}/chat`, { text, legend });
+        d.chat.push(question, reply);
+        pending.replaceWith(chatMessage(question)); typing.replaceWith(chatMessage(reply));
+        applyLegend();
+      } catch (ex) {
+        pending.remove(); typing.remove(); input.value = text;
+        err.textContent = ex.message; err.classList.remove("hidden");
+      } finally { refresh(); if (!input.disabled) input.focus(); }
+    });
+    refresh();
+    slot.append(el("div", { class: "card chat" }, [
+      el("h3", { text: "💬 Обсудить с судьёй" }),
+      el("p", { class: "muted small", text: "Переспросите, попросите объяснить или оспорьте вывод. Судья меняет оценку только под весом доводов и новых фактов, а не настойчивости; вердикт выше при этом не переписывается." }),
+      log, form,
+    ]));
+  }
+
   function renderStats(done) {
     const s = $("[data-stats]"); if (!s) return;
     const parts = [`Время разбора: ${fmtMs(done.duration_ms)}`];
@@ -437,6 +490,10 @@
         lines.push("");
       }
       list("На чём сошлись аналитики", v.consensus); list("Осталось открытым", v.open_questions);
+    }
+    if (d.chat?.length) {
+      lines.push("## 💬 Обсуждение с судьёй", "");
+      for (const m of d.chat) lines.push(`**${m.role === "judge" ? "Судья" : "Вы"}:** ${m.text}`, "");
     }
     return lines.join("\n");
   }

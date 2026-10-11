@@ -233,6 +233,23 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
 .v-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 20px; padding-top: 14px; border-top: 1px solid var(--border); }
 .v-foot .stats { flex: 1 1 100%; font-size: 13px; color: var(--text-muted); }
 
+/* Judge chat */
+.chat h3 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--judge); }
+.chat > .muted { margin: 0 0 14px; }
+.chat-log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
+.chat-log:empty { display: none; }
+.msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }
+.msg p { margin: 0 0 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.msg p:last-child { margin-bottom: 0; }
+.msg-who { font-size: 12px; font-weight: 700; color: var(--text-muted); margin-bottom: 4px; }
+.msg.user { align-self: flex-end; background: color-mix(in srgb, var(--primary) 10%, var(--surface)); border-color: color-mix(in srgb, var(--primary) 30%, var(--border)); }
+.msg.judge { align-self: flex-start; border-left: 4px solid var(--judge); }
+.msg.typing { min-width: 50%; }
+.chat-form { display: flex; flex-direction: column; gap: 8px; }
+.chat-form textarea { min-height: 84px; }
+.chat-actions { display: flex; align-items: center; gap: 12px; }
+.chat-actions .muted { flex: 1; }
+
 @media (max-width: 900px) {
   .only-mobile { display: inline-block; }
   .layout { grid-template-columns: 1fr; }
@@ -253,4 +270,6 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
   .card { padding: 14px; }
   .source-title { font-size: 17px; }
   .claims { display: block; overflow-x: auto; }
+  .msg { max-width: 100%; }
+  .chat-actions .hint { display: none; }
 }
