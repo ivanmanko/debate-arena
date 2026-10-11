@@ -115,7 +115,7 @@ src/debate_arena/
 ## Тесты и линт
 
 ```bash
-uv run pytest                    # 145 тестов, без сети и ключей: домен, провайдеры (httpx
+uv run pytest                    # 152 теста, без сети и ключей: домен, провайдеры (httpx
                                  # MockTransport / stub-клиент), поток, сервис, репозиторий
                                  # на временном SQLite, контракт API, презентер бота
 uv run ruff check . && uv run ruff format --check src tests
@@ -125,10 +125,10 @@ uv run ruff check . && uv run ruff format --check src tests
 
 | Что | Значение | Как измерено |
 |---|---|---|
-| Unit-тесты | 145 passed, ~3.3 с | `uv run pytest`, 2026-10-11, MacBook (Apple Silicon) |
+| Unit-тесты | 152 passed, ~3.4 с | `uv run pytest`, 2026-10-11, MacBook (Apple Silicon) |
 | Разбор в mock-режиме, 1 раунд | 0.8 с | `python -m debate_arena.interface.cli`, 2026-10-11 |
 | Разбор с Sonnet 5.5, 3 раунда (10 вызовов) | 110 с; реплика 9–20 с, судья 21 с; ~18k входных токенов у судьи | живой прогон 2026-10-11, лог сервера |
-| Разбор с Opus 5.5 | **не измерено** | записать после прогона |
+| Разбор с Opus 5.5, 3 раунда (10 вызовов), диалог | 216 с; реплика 18–30 с, судья 54 с; ~26k входных токенов у судьи | живой прогон 2026-10-11, лог сервера |
 
 ## Cut scope
 
