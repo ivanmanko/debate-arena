@@ -115,3 +115,55 @@ class TestAnonymize:
         result = anonymize_dialogue("Ann: hi\nBob: hey", ["Ann", "Bob"], language="English")
         assert result.participants == ["Participant A", "Participant B"]
         assert result.text == "Participant A: hi\nParticipant B: hey"
+
+
+QUOTED = (
+    "> Vanya:\n"
+    "Мысль которая меня давно беспокоит.\n"
+    "Вторая строка той же мысли.\n"
+    "#мысли\n"
+    "> Friska Sosiska:\n"
+    "это и есть здравый смысл\n"
+    "> Vanya:\n"
+    "Отвечаю Фриске: нет.\n"
+    "> Kira:\n"
+    "Ваня, а Фриска права."
+)
+
+
+class TestQuotedFormat:
+    def test_name_on_its_own_line_with_quote_markers(self):
+        parts = parse_dialogue(QUOTED)
+        assert [p.name for p in parts] == ["Vanya", "Friska Sosiska", "Kira"]
+        assert (
+            parts[0].lines[0]
+            == "Мысль которая меня давно беспокоит.\nВторая строка той же мысли.\n#мысли"
+        )
+        assert parts[0].lines[1] == "Отвечаю Фриске: нет."
+        assert parts[2].lines == ["Ваня, а Фриска права."]
+
+    def test_bullet_prefixed_speakers(self):
+        parts = parse_dialogue("- Аня: привет\n• Боб: привет\n>> Аня: ещё")
+        assert [p.name for p in parts] == ["Аня", "Боб"]
+        assert len(parts[0].lines) == 2
+
+    def test_auto_detects_dialogue_by_message_count_when_bodies_are_long(self):
+        # 4 speaker lines out of 10 — share 0.4 < 0.6, but 4 messages from 3 people.
+        mode, names = resolve_mode(QUOTED, "auto", line_share=0.6, min_messages=4)
+        assert mode == "dialogue" and names == ["Vanya", "Friska Sosiska", "Kira"]
+        mode, _ = resolve_mode(QUOTED, "auto", line_share=0.6, min_messages=5)
+        assert mode == "text"
+
+    def test_anonymize_quoted_format_and_transliterated_mentions(self):
+        from debate_arena.domain.dialogue import anonymize_dialogue
+
+        result = anonymize_dialogue(QUOTED, ["Vanya", "Friska Sosiska", "Kira"], "русский")
+        lines = result.text.splitlines()
+        assert lines[0] == "Собеседник А:"
+        assert lines[1] == "Мысль которая меня давно беспокоит."
+        assert "Собеседник Б:" in lines and "Собеседник В:" in lines
+        for leaked in ("Vanya", "Friska", "Kira", "Ваня", "Фриска", "Фриске"):
+            assert leaked not in result.text, (leaked, result.text)
+        assert "Отвечаю Собеседник Б: нет." in result.text
+        assert "Собеседник А, а Собеседник Б права." in result.text
+        assert ">" not in result.text

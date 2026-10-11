@@ -71,6 +71,7 @@ class TestRoundPrompts:
         assert "ДИАЛОГ" in text
         assert "Собеседники: Иван, Мария." in text
         assert "победител" in text.lower()  # explicitly told not to pick one
+        assert "ровно так, как они подписаны" in text
         cross = cross_round_user("t", None, "x", 2, LANG, participants=["Иван", "Мария"])
         assert "Собеседники: Иван, Мария." in cross
         assert "Собеседники:" not in round_one_user("t", None, LANG)
