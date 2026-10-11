@@ -374,11 +374,49 @@ class TestShare:
 
     def test_dialogue_snapshot_has_labels_only(self, setup):
         client, publisher = setup
-        analysis_id = self._finished(client, text="Иван: вода мокрая\nМария: Иван, нет")
+        body = {
+            "text": "Иван: вода мокрая\nМария: Иван, нет",
+            "question": "Кто прав — Иван или Мария?",
+            "rounds": 1,
+        }
+        analysis_id = client.post("/api/analyses", json=body).json()["id"]
+        _events(client, analysis_id)
+        assert client.get(f"/api/analyses/{analysis_id}").json()["question"] == (
+            "Кто прав — Собеседник А или Собеседник Б?"
+        )
         client.post(f"/api/analyses/{analysis_id}/share")
         (page,) = publisher.objects.values()
         assert "Собеседник А" in page
         assert "Иван" not in page and "Мария" not in page
+
+    def test_storage_error_details_stay_on_the_server(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        publisher.fail = True
+        detail = client.post(f"/api/analyses/{analysis_id}/share").json()["detail"]
+        assert detail == "snapshot storage is unavailable"
+
+
+class TestShareLocalDir:
+    """End to end with the real local storage: the link opens, then stops (SPEC §6 №21)."""
+
+    def test_link_opens_and_stops_after_withdraw(self, tmp_path):
+        app = create_app(
+            _settings(share_dir=str(tmp_path / "shared")),
+            repo=InMemoryRepository(),
+            provider_factory=lambda model: FakeProvider(),
+        )
+        with TestClient(app) as c:
+            assert c.get("/shared/nothing.html").status_code == 404
+            analysis_id = c.post("/api/analyses", json={"text": "t", "rounds": 1}).json()["id"]
+            _events(c, analysis_id)
+            url = c.post(f"/api/analyses/{analysis_id}/share").json()["url"]
+            assert url.startswith("/shared/")
+            page = c.get(url)
+            assert page.status_code == 200
+            assert page.headers["content-type"].startswith("text/html")
+            assert c.delete(f"/api/analyses/{analysis_id}/share").status_code == 204
+            assert c.get(url).status_code == 404
 
 
 class TestConfigAndHealth:

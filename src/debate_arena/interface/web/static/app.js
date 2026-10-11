@@ -418,7 +418,7 @@
     if (d.status !== "finished" || !d.verdict) return;
     const err = el("p", { class: "error hidden" });
     const fail = (ex) => { err.textContent = ex.message; err.classList.remove("hidden"); };
-    const what = "Публикуются исходный материал, реплики аналитиков и вердикт. Обсуждение с судьёй не публикуется" + (d.mode === "dialogue" ? ", собеседники остаются под метками." : ".");
+    const what = "Публикуются исходный материал, реплики аналитиков и вердикт — в том виде, в каком они хранятся на сервере. Обсуждение с судьёй не публикуется" + (d.mode === "dialogue" ? ", настоящие имена из этого браузера — тоже." : ".");
     const local = state.config?.share_backend === "local" ? " Снимок лежит на этом сервере: ссылка откроется у других, только если сервер им доступен." : "";
     if (!d.share) {
       const btn = el("button", { class: "btn btn-primary btn-sm", type: "button", text: "🌐 Опубликовать" });

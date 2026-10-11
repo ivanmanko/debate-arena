@@ -16,7 +16,12 @@ from dataclasses import dataclass, field
 
 from ..config import Settings
 from ..domain.analysts import build_analysts
-from ..domain.dialogue import RequestedMode, anonymize_dialogue, resolve_mode
+from ..domain.dialogue import (
+    RequestedMode,
+    anonymize_dialogue,
+    anonymize_mentions,
+    resolve_mode,
+)
 from ..domain.events import AnalysisEvent
 from ..domain.exceptions import (
     AnalysisNotFound,
@@ -115,6 +120,8 @@ class AnalysisService:
         if input_mode == "dialogue" and s.anonymize_participants:
             anonymized = anonymize_dialogue(text, participants, s.language)
             text, participants, legend = anonymized.text, anonymized.participants, anonymized.legend
+            if question:
+                question = anonymize_mentions(question, legend)
         if not 1 <= rounds <= s.max_rounds:
             raise ValueError(f"rounds must be within 1..{s.max_rounds}")
         if model:

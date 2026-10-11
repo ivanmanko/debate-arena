@@ -87,12 +87,9 @@ def create_app(
     app.include_router(router)
 
     if settings.share_backend == "local":
-        # Snapshots without GCS (SPEC §4.7); the directory appears on the first publish.
-        app.mount(
-            SHARED_PATH,
-            StaticFiles(directory=settings.share_dir, check_dir=False),
-            name="shared",
-        )
+        # Snapshots without GCS (SPEC §4.7). Created up front: a missing directory is a 500.
+        Path(settings.share_dir).mkdir(parents=True, exist_ok=True)
+        app.mount(SHARED_PATH, StaticFiles(directory=settings.share_dir), name="shared")
 
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")

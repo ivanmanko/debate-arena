@@ -6,9 +6,12 @@ decides when publishing is allowed and keeps the storage and the database in ste
 
 from __future__ import annotations
 
+import asyncio
+import contextlib
 import logging
 import secrets
-from collections.abc import Callable
+from collections.abc import Awaitable, Callable
+from typing import Literal
 
 from ..domain.exceptions import AnalysisNotFound, ShareNotFound, ShareUnavailable
 from ..domain.ports import AnalysisRepository, SnapshotPublisher
@@ -34,13 +37,38 @@ class ShareService:
         self._publisher = publisher
         self._render = render
         self._token_bytes = token_bytes
+        # One process (SPEC §1): a per-analysis lock serialises publish, withdraw and delete,
+        # so a page can neither be uploaded twice nor outlive its analysis.
+        self._locks: dict[int, asyncio.Lock] = {}
 
     @property
-    def backend(self) -> str:
+    def backend(self) -> Literal["gcs", "local"]:
         return self._publisher.backend
 
     async def publish(self, analysis_id: int) -> ShareRecord:
         """Publish once; a published analysis returns its existing link (the verdict is final)."""
+        async with self._lock(analysis_id):
+            return await self._publish(analysis_id)
+
+    async def withdraw(self, analysis_id: int) -> None:
+        """Remove the page, then the record; on a storage error the record stays."""
+        async with self._lock(analysis_id):
+            await self._withdraw(analysis_id)
+
+    async def delete_analysis(
+        self, analysis_id: int, delete: Callable[[], Awaitable[object]]
+    ) -> None:
+        """Withdraw the page if any, then run ``delete`` — atomically w.r.t. publishing."""
+        async with self._lock(analysis_id):
+            with contextlib.suppress(AnalysisNotFound, ShareNotFound):
+                await self._withdraw(analysis_id)
+            await delete()
+        self._locks.pop(analysis_id, None)
+
+    def _lock(self, analysis_id: int) -> asyncio.Lock:
+        return self._locks.setdefault(analysis_id, asyncio.Lock())
+
+    async def _publish(self, analysis_id: int) -> ShareRecord:
         record = await self._get(analysis_id)
         if record.share is not None:
             return record.share
@@ -51,27 +79,20 @@ class ShareService:
         try:
             share = await self._repo.save_share(analysis_id, key, url)
         except BaseException:
-            # A page nobody can withdraw must not outlive a failed save.
+            # A page nobody can withdraw must not outlive a failed save. A cancellation while
+            # the upload thread runs can still leave an orphan object (accepted, AI_NOTES).
             await self._unpublish_quietly(key)
             raise
         logger.info("share.published analysis=%s backend=%s", analysis_id, self.backend)
         return share
 
-    async def withdraw(self, analysis_id: int) -> None:
-        """Remove the page, then the record; on a storage error the record stays."""
+    async def _withdraw(self, analysis_id: int) -> None:
         record = await self._get(analysis_id)
         if record.share is None:
             raise ShareNotFound(str(analysis_id))
         await self._publisher.unpublish(record.share.key)
         await self._repo.delete_share(analysis_id)
         logger.info("share.withdrawn analysis=%s", analysis_id)
-
-    async def withdraw_if_shared(self, analysis_id: int) -> None:
-        """Before deleting an analysis: withdraw its page if there is one."""
-        try:
-            await self.withdraw(analysis_id)
-        except (AnalysisNotFound, ShareNotFound):
-            return
 
     async def _get(self, analysis_id: int) -> AnalysisRecord:
         record = await self._repo.get(analysis_id)

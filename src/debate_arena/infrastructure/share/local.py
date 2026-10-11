@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import re
 from pathlib import Path
+from typing import Literal
 
 from ...domain.exceptions import PublishError
 
@@ -15,7 +16,7 @@ SHARED_PATH = "/shared"
 
 
 class LocalDirPublisher:
-    backend = "local"
+    backend: Literal["local"] = "local"
 
     def __init__(self, directory: Path, *, base_url: str) -> None:
         self._dir = directory
@@ -30,14 +31,15 @@ class LocalDirPublisher:
         return f"{self._base}{SHARED_PATH}/{path.name}"
 
     async def unpublish(self, key: str) -> None:
+        path = self._path(key)
         try:
-            await asyncio.to_thread(self._path(key).unlink, missing_ok=True)
+            await asyncio.to_thread(path.unlink, missing_ok=True)
         except OSError as exc:
             raise PublishError(f"{type(exc).__name__}: {exc}") from exc
 
     def _path(self, key: str) -> Path:
         if not _KEY_RE.fullmatch(key):
-            raise ValueError(f"invalid snapshot key {key!r}")
+            raise PublishError(f"invalid snapshot key {key!r}")
         return self._dir / f"{key}.html"
 
     @staticmethod

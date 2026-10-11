@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain.schemas import parse_model_ref
@@ -85,7 +85,8 @@ class Settings(BaseSettings):
     # --- Public snapshots (SPEC §4.7, §7, ADR-006) ---
     share_bucket: str = ""  # GCS bucket; empty → local directory served at /shared/
     share_dir: str = "./shared"
-    share_token_bytes: int = 16  # 128 bits: the link cannot be guessed
+    # 128 bits: the link cannot be guessed; ≤ 48 keeps the key within the 64-char column.
+    share_token_bytes: int = Field(default=16, ge=16, le=48)
     share_cache_max_age_s: int = 60  # how long a withdrawn page may linger in caches
 
     # --- Storage / web / bot ---

@@ -15,6 +15,7 @@ from html import escape
 from pathlib import Path
 
 from ...application.flow import CROSS_ROUND_KIND, ROUND_ONE_KIND
+from ...domain.dialogue import participant_label
 from ...domain.records import AnalysisRecord, TurnRecord
 from ...domain.schemas import AnalystSpec, Verdict
 
@@ -39,6 +40,8 @@ _HEADING_RE = re.compile(r"(^|\n)#{1,4}\s*")
 _BOLD_MARKER_RE = re.compile(r"\*\*(Принимаю|Оспариваю|Уточняю):\*\*")
 _PARA_RE = re.compile(r"\n\s*\n")
 _DESCRIPTION_CHARS = 200
+# Defence in depth: the page needs nothing but its inline style and the data: favicon.
+_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:"
 
 
 def render_snapshot(record: AnalysisRecord, analysts: Sequence[AnalystSpec]) -> str:
@@ -63,6 +66,7 @@ def render_snapshot(record: AnalysisRecord, analysts: Sequence[AnalystSpec]) -> 
         '<meta name="viewport" content="width=device-width, initial-scale=1">'
         '<meta name="robots" content="noindex, nofollow">'
         '<meta name="referrer" content="no-referrer">'
+        f'<meta http-equiv="Content-Security-Policy" content="{_CSP}">'
         f"<title>{_e(title)}</title>"
         f'<meta name="description" content="{_e(description)}">'
         f'<meta property="og:title" content="{_e(record.title)}">'
@@ -240,7 +244,7 @@ def _foot(record: AnalysisRecord) -> str:
         "Снимок разбора: аналитики и судья — языковые модели, они работают только с текстом и "
         "своими знаниями, без поиска по источникам.",
     ]
-    if record.mode == "dialogue":
+    if record.mode == "dialogue" and _are_labels(record.participants):
         lines.append("Имена собеседников заменены метками.")
     return '<footer class="foot">' + "".join(f"<p>{_e(t)}</p>" for t in lines) + "</footer>"
 
@@ -285,6 +289,14 @@ def _mini_list(title: str, items: Iterable[str]) -> str:
 def _list(items: Iterable[str]) -> str:
     lis = "".join(f"<li>{_e(i)}</li>" for i in items)
     return f"<ul>{lis}</ul>" if lis else '<p class="muted small">—</p>'
+
+
+def _are_labels(participants: Sequence[str]) -> bool:
+    """True when the names are §4.0b labels, not real names (ANONYMIZE_PARTICIPANTS=false)."""
+    return bool(participants) and any(
+        list(participants) == [participant_label(i, lang) for i in range(len(participants))]
+        for lang in ("русский", "english")
+    )
 
 
 def _claim_label(status: str) -> str:

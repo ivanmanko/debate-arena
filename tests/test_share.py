@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import re
 
 import pytest
@@ -155,13 +156,82 @@ class TestWithdraw:
             await service.withdraw(analysis_id)
         assert (await repo.get(analysis_id)).share == share
 
-    async def test_withdraw_if_shared_is_quiet_for_unshared_and_missing(self):
+
+class TestDeleteAnalysis:
+    async def test_withdraws_then_deletes(self):
         repo, publisher = InMemoryRepository(), FakePublisher()
         analysis_id = await _analysis(repo)
         service = _service(repo, publisher)
-        await service.withdraw_if_shared(analysis_id)
-        await service.withdraw_if_shared(42)
+        await service.publish(analysis_id)
+        await service.delete_analysis(analysis_id, lambda: repo.delete(analysis_id))
+        assert publisher.objects == {}
+        assert await repo.get(analysis_id) is None
+
+    async def test_unshared_and_missing_still_run_delete(self):
+        repo, publisher = InMemoryRepository(), FakePublisher()
+        analysis_id = await _analysis(repo)
+        service = _service(repo, publisher)
+        deleted: list[int] = []
+
+        async def delete(i=analysis_id):
+            deleted.append(i)
+
+        await service.delete_analysis(analysis_id, delete)
+        await service.delete_analysis(42, lambda: delete(42))
+        assert deleted == [analysis_id, 42]
         assert publisher.calls == []
+
+    async def test_storage_failure_keeps_analysis(self):
+        repo, publisher = InMemoryRepository(), FakePublisher()
+        analysis_id = await _analysis(repo)
+        service = _service(repo, publisher)
+        await service.publish(analysis_id)
+        publisher.fail = True
+        with pytest.raises(PublishError):
+            await service.delete_analysis(analysis_id, lambda: repo.delete(analysis_id))
+        assert await repo.get(analysis_id) is not None
+
+
+class SlowPublisher(FakePublisher):
+    """Holds the upload until released, so a second request can arrive meanwhile."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.release = asyncio.Event()
+
+    async def publish(self, key: str, html: str) -> str:
+        self.calls.append(("upload-started", key))
+        await self.release.wait()
+        return await super().publish(key, html)
+
+
+class TestRaces:
+    async def test_concurrent_publish_uploads_once_and_returns_one_link(self):
+        repo, publisher = InMemoryRepository(), SlowPublisher()
+        analysis_id = await _analysis(repo)
+        service = _service(repo, publisher)
+        first = asyncio.create_task(service.publish(analysis_id))
+        second = asyncio.create_task(service.publish(analysis_id))
+        await asyncio.sleep(0)
+        publisher.release.set()
+        a, b = await asyncio.gather(first, second)
+        assert a == b
+        assert len(publisher.objects) == 1
+
+    async def test_delete_during_publish_leaves_no_page(self):
+        repo, publisher = InMemoryRepository(), SlowPublisher()
+        analysis_id = await _analysis(repo)
+        service = _service(repo, publisher)
+        publishing = asyncio.create_task(service.publish(analysis_id))
+        await asyncio.sleep(0)  # the upload is in flight
+        deleting = asyncio.create_task(
+            service.delete_analysis(analysis_id, lambda: repo.delete(analysis_id))
+        )
+        await asyncio.sleep(0)
+        publisher.release.set()
+        await asyncio.gather(publishing, deleting)
+        assert publisher.objects == {}
+        assert await repo.get(analysis_id) is None
 
 
 class TestSnapshotPage:
@@ -216,13 +286,32 @@ class TestSnapshotPage:
         assert "Ближе всего к истине" in page
 
     async def test_escapes_html_in_every_text(self):
-        attack = "<script>alert(1)</script>"
-        record = await self._record(source_text=f"Текст {attack}")
-        record.turns[0].text = f"Реплика {attack}"
-        verdict = record.verdict.model_copy(update={"conclusion": attack, "narrative": attack})
-        page = render_snapshot(record.model_copy(update={"verdict": verdict}), ANALYSTS)
+        attack = '<script>alert(1)</script>"'
+        record = await self._record(source_text=attack, participants=[attack, attack + "2"])
+        verdict = _poison(record.verdict, attack)
+        record = record.model_copy(
+            update={
+                "title": attack,
+                "question": attack,
+                "verdict": verdict,
+                "turns": [
+                    t.model_copy(update={"text": attack, "emoji": attack}) for t in record.turns
+                ],
+            }
+        )
+        page = render_snapshot(record, ANALYSTS)
         assert "<script" not in page
-        assert "&lt;script&gt;alert(1)&lt;/script&gt;" in page
+        assert "&lt;script&gt;" in page
+
+    async def test_content_security_policy_forbids_scripts(self):
+        page = render_snapshot(await self._record(), ANALYSTS)
+        assert "Content-Security-Policy" in page and "default-src 'none'" in page
+
+    async def test_footer_mentions_labels_only_when_names_are_labels(self):
+        labelled = render_snapshot(await self._record(participants=DIALOGUE), ANALYSTS)
+        real = render_snapshot(await self._record(participants=["Иван", "Мария"]), ANALYSTS)
+        assert "заменены метками" in labelled
+        assert "заменены метками" not in real
 
     async def test_chat_is_not_published(self):
         repo = InMemoryRepository()
@@ -231,3 +320,23 @@ class TestSnapshotPage:
         page = render_snapshot(await repo.get(analysis_id), ANALYSTS)
         assert "личный вопрос судье" not in page
         assert "личный ответ судьи" not in page
+
+
+def _poison(model, attack: str):
+    """Every str field of a pydantic model (recursively) replaced by ``attack``."""
+    from pydantic import BaseModel
+
+    update = {}
+    for name, value in model:
+        if isinstance(value, str):
+            update[name] = attack
+        elif isinstance(value, list):
+            update[name] = [
+                _poison(v, attack)
+                if isinstance(v, BaseModel)
+                else attack
+                if isinstance(v, str)
+                else v
+                for v in value
+            ]
+    return model.model_copy(update=update)

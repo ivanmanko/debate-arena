@@ -8,7 +8,7 @@ Credentials are Application Default Credentials (the Cloud Run service account).
 from __future__ import annotations
 
 import asyncio
-from typing import Any
+from typing import Any, Literal
 
 from ...domain.exceptions import PublishError
 
@@ -16,7 +16,7 @@ PUBLIC_HOST = "https://storage.googleapis.com"
 
 
 class GcsPublisher:
-    backend = "gcs"
+    backend: Literal["gcs"] = "gcs"
 
     def __init__(self, bucket_name: str, *, cache_max_age_s: int, bucket: Any = None) -> None:
         self._name = bucket_name
@@ -46,7 +46,10 @@ class GcsPublisher:
     def _upload(self, name: str, html: str) -> None:
         blob = self._get_bucket().blob(name)
         blob.cache_control = self._cache_control
-        blob.upload_from_string(html, content_type="text/html; charset=utf-8")
+        # if_generation_match=0: never overwrite an object, and the library retries the call.
+        blob.upload_from_string(
+            html, content_type="text/html; charset=utf-8", if_generation_match=0
+        )
 
     def _delete(self, name: str) -> None:
         from google.api_core.exceptions import NotFound

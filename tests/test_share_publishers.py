@@ -31,8 +31,11 @@ class TestLocalDir:
 
     @pytest.mark.parametrize("key", ["../evil", "a/b", ""])
     async def test_rejects_keys_that_escape_the_directory(self, tmp_path, key):
-        with pytest.raises(ValueError):
-            await LocalDirPublisher(tmp_path, base_url="").publish(key, "x")
+        publisher = LocalDirPublisher(tmp_path, base_url="")
+        with pytest.raises(PublishError):
+            await publisher.publish(key, "x")
+        with pytest.raises(PublishError):
+            await publisher.unpublish(key)
 
 
 class _FakeBlob:
@@ -40,9 +43,10 @@ class _FakeBlob:
         self.bucket, self.name = bucket, name
         self.cache_control: str | None = None
 
-    def upload_from_string(self, data: str, content_type: str) -> None:
+    def upload_from_string(self, data: str, content_type: str, if_generation_match: int) -> None:
         if self.bucket.fail:
             raise RuntimeError("503 backend error")
+        assert if_generation_match == 0  # never overwrite; makes the upload retryable
         self.bucket.objects[self.name] = (data, content_type, self.cache_control)
 
     def delete(self) -> None:
@@ -107,3 +111,11 @@ def test_factory_defaults_to_local_dir(tmp_path):
 def test_settings_report_backend():
     assert _settings().share_backend == "local"
     assert _settings(share_bucket="snaps").share_backend == "gcs"
+
+
+@pytest.mark.parametrize("value", [8, 64])
+def test_token_bytes_bounds(value):
+    from pydantic import ValidationError
+
+    with pytest.raises(ValidationError):
+        _settings(share_token_bytes=value)

@@ -23,6 +23,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://rational:rational@postgres:5432/rational
       WEB_HOST: 0.0.0.0
+      SHARE_DIR: /data/shared
+    volumes:
+      - shared:/data/shared  # published snapshots survive rebuilds (ADR-006)
     ports:
       - "8000:8000"
     restart: unless-stopped
@@ -43,3 +46,4 @@ services:
 
 volumes:
   pgdata:
+  shared:

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import StreamingResponse
 
@@ -36,6 +38,7 @@ from .schemas import (
 from .sse import sse_stream
 
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 def get_service(request: Request) -> AnalysisService:
@@ -142,6 +145,12 @@ async def ask_judge(
     return ChatExchangeOut(question=exchange.question, reply=exchange.reply)
 
 
+def _storage_unavailable(exc: PublishError) -> HTTPException:
+    """Bucket names, paths and storage error bodies stay in the server log."""
+    logger.warning("snapshot storage failed: %s", exc)
+    return HTTPException(status.HTTP_502_BAD_GATEWAY, detail="snapshot storage is unavailable")
+
+
 @router.post("/api/analyses/{analysis_id}/share", response_model=ShareOut)
 async def publish_analysis(analysis_id: int, share: ShareService = Depends(get_share)) -> ShareOut:
     try:
@@ -151,7 +160,7 @@ async def publish_analysis(analysis_id: int, share: ShareService = Depends(get_s
     except ShareUnavailable as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     except PublishError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise _storage_unavailable(exc) from exc
     return ShareOut(url=record.url, created_at=record.created_at)
 
 
@@ -164,7 +173,7 @@ async def withdraw_analysis(analysis_id: int, share: ShareService = Depends(get_
     except ShareNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis is not published") from exc
     except PublishError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise _storage_unavailable(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -179,20 +188,20 @@ async def delete_analysis(
         raise HTTPException(status.HTTP_409_CONFLICT, detail="the judge is still answering")
     try:
         # A public page must not outlive its analysis: withdraw first, keep it on failure.
-        await share.withdraw_if_shared(analysis_id)
-        await service.delete(analysis_id)
+        await share.delete_analysis(analysis_id, lambda: service.delete(analysis_id))
     except AnalysisRunning as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="analysis is still running") from exc
     except AnalysisNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
     except PublishError as exc:
-        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        raise _storage_unavailable(exc) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/api/config", response_model=ConfigOut)
 async def get_config(
     service: AnalysisService = Depends(get_service),
+    share: ShareService = Depends(get_share),
     settings: Settings = Depends(get_settings_dep),
 ) -> ConfigOut:
     return ConfigOut(
@@ -206,7 +215,7 @@ async def get_config(
         analysts=[AnalystOut(name=a.name, emoji=a.emoji, focus=a.focus) for a in service.analysts],
         chat_max_chars=settings.judge_chat_max_chars,
         chat_max_messages=settings.judge_chat_max_messages,
-        share_backend=settings.share_backend,
+        share_backend=share.backend,
     )
 
 

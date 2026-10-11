@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, TypeVar
+from typing import Literal, Protocol, TypeVar
 
 from pydantic import BaseModel
 
@@ -103,7 +103,7 @@ class AnalysisRepository(Protocol):
 class SnapshotPublisher(Protocol):
     """Public storage for analysis snapshots (ADR-006). Errors surface as ``PublishError``."""
 
-    backend: str  # "gcs" | "local", reported in GET /api/config
+    backend: Literal["gcs", "local"]  # reported in GET /api/config
 
     async def publish(self, key: str, html: str) -> str:
         """Store the page under ``key`` and return its public URL."""
