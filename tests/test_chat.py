@@ -230,6 +230,20 @@ class TestAsk:
         assert (await repo.get(analysis_id)).chat == []
         await _chat(repo, FakeProvider()).ask(analysis_id, "снова")
 
+    async def test_hanging_reply_times_out_and_releases_lock(self):
+        class Hanging(FakeProvider):
+            async def complete(self, request: ChatRequest) -> Completion:
+                await asyncio.sleep(10)
+                return Completion(text="поздно", usage=Usage())
+
+        repo = InMemoryRepository()
+        analysis_id = await _analysis(repo)
+        chat = _chat(repo, Hanging(), _settings(judge_chat_timeout_s=0.01))
+        with pytest.raises(ProviderError, match="did not answer"):
+            await chat.ask(analysis_id, "вопрос")
+        assert not chat.is_busy(analysis_id)
+        assert (await repo.get(analysis_id)).chat == []
+
     async def test_refusal_propagates(self):
         class Refusing(FakeProvider):
             async def complete(self, request: ChatRequest) -> Completion:
@@ -266,6 +280,16 @@ class TestAnonymization:
         dialogue_id = await _analysis(repo, participants=DIALOGUE)
         exchange = await chat.ask(dialogue_id, "вода мокрая", legend={"Собеседник Я": "вода"})
         assert exchange.question.text == "вода мокрая"
+
+
+class TestMarker:
+    def test_chat_marker_appears_in_no_other_prompt(self):
+        from debate_arena.domain.analysts import ANALYSTS
+        from debate_arena.domain.prompts import judge_system_prompt
+
+        assert JUDGE_CHAT_MARKER not in MANIFEST
+        assert JUDGE_CHAT_MARKER not in judge_system_prompt(LANG)
+        assert all(JUDGE_CHAT_MARKER not in a.system_prompt for a in ANALYSTS)
 
 
 class TestMock:

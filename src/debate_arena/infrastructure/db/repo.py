@@ -13,7 +13,6 @@ from ...domain.records import (
     AnalysisRecord,
     AnalysisSummary,
     ChatMessageRecord,
-    ChatRole,
     TurnRecord,
 )
 from ...domain.schemas import Verdict
@@ -80,14 +79,17 @@ class SqlAlchemyAnalysisRepository:
             )
             await session.commit()
 
-    async def add_chat_message(
-        self, analysis_id: int, role: ChatRole, text: str
-    ) -> ChatMessageRecord:
+    async def add_chat_exchange(
+        self, analysis_id: int, question: str, reply: str
+    ) -> tuple[ChatMessageRecord, ChatMessageRecord]:
         async with self._sessions() as session:
-            row = JudgeMessage(analysis_id=analysis_id, role=role, text=text)
-            session.add(row)
+            rows = (
+                JudgeMessage(analysis_id=analysis_id, role="user", text=question),
+                JudgeMessage(analysis_id=analysis_id, role="judge", text=reply),
+            )
+            session.add_all(rows)
             await session.commit()
-            return _to_chat_message(row)
+            return _to_chat_message(rows[0]), _to_chat_message(rows[1])
 
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int

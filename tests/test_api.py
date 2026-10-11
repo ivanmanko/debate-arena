@@ -212,6 +212,44 @@ class TestChat:
         analysis_id = self._finished(client)
         assert client.post(f"/api/analyses/{analysis_id}/chat", json=body).status_code == 422
 
+    def test_message_limit_is_409(self):
+        app = create_app(
+            _settings(judge_chat_max_messages=1),
+            repo=InMemoryRepository(),
+            provider_factory=lambda model: FakeProvider(),
+        )
+        with TestClient(app) as c:
+            analysis_id = self._finished(c)
+            assert (
+                c.post(f"/api/analyses/{analysis_id}/chat", json={"text": "1"}).status_code == 200
+            )
+            assert (
+                c.post(f"/api/analyses/{analysis_id}/chat", json={"text": "2"}).status_code == 409
+            )
+
+    def test_delete_while_judge_answers_is_409(self, client):
+        analysis_id = self._finished(client)
+        client.app.state.chat._busy.add(analysis_id)  # a reply in flight
+        assert client.delete(f"/api/analyses/{analysis_id}").status_code == 409
+        client.app.state.chat._busy.discard(analysis_id)
+        assert client.delete(f"/api/analyses/{analysis_id}").status_code == 204
+
+    def test_unconfigured_judge_provider_is_503(self):
+        from debate_arena.domain.exceptions import ProviderNotConfigured
+
+        def factory(model: str):
+            if model == "mock/rational" and factory.analysed:
+                raise ProviderNotConfigured("ANTHROPIC_API_KEY is not set")
+            return FakeProvider()
+
+        factory.analysed = False
+        app = create_app(_settings(), repo=InMemoryRepository(), provider_factory=factory)
+        with TestClient(app) as c:
+            analysis_id = self._finished(c)
+            factory.analysed = True
+            response = c.post(f"/api/analyses/{analysis_id}/chat", json={"text": "?"})
+            assert response.status_code == 503
+
     def test_running_analysis_is_409(self):
         app = create_app(
             _settings(), repo=InMemoryRepository(), provider_factory=lambda model: SlowProvider()

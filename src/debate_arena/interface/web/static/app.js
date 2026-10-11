@@ -455,9 +455,12 @@
       } finally { refresh(); if (!input.disabled) input.focus(); }
     });
     refresh();
+    // Without the legend the server cannot replace real names in the message (SPEC §4.6).
+    const noLegend = d.mode === "dialogue" && !(state.current?.legend && Object.keys(state.current.legend).length);
     slot.append(el("div", { class: "card chat" }, [
       el("h3", { text: "💬 Обсудить с судьёй" }),
       el("p", { class: "muted small", text: "Переспросите, попросите объяснить или оспорьте вывод. Судья меняет оценку только под весом доводов и новых фактов, а не настойчивости; вердикт выше при этом не переписывается." }),
+      noLegend ? el("p", { class: "notice small", text: `Настоящие имена этого диалога в этом браузере не сохранены — называйте собеседников метками (${d.participants.join(", ")}), иначе имена уйдут в модель.` }) : null,
       log, form,
     ]));
   }

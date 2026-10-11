@@ -236,6 +236,7 @@ textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb
 /* Judge chat */
 .chat h3 { margin: 0 0 4px; font-size: 14px; text-transform: uppercase; letter-spacing: .06em; color: var(--judge); }
 .chat > .muted { margin: 0 0 14px; }
+.chat > .notice { margin: 0 0 14px; }
 .chat-log { display: flex; flex-direction: column; gap: 10px; margin-bottom: 14px; }
 .chat-log:empty { display: none; }
 .msg { max-width: 85%; padding: 10px 14px; border-radius: 12px; border: 1px solid var(--border); background: var(--surface-2); }

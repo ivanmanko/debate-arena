@@ -79,6 +79,8 @@ class Settings(BaseSettings):
     judge_chat_max_tokens: int = 6_000
     judge_chat_max_chars: int = 2_000
     judge_chat_max_messages: int = 20
+    # Frees the per-analysis lock if a reply hangs; the SDK's own timeout is minutes.
+    judge_chat_timeout_s: float = 180.0
 
     # --- Storage / web / bot ---
     database_url: str = "sqlite+aiosqlite:///./debate_arena.db"

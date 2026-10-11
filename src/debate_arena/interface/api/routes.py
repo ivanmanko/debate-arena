@@ -132,8 +132,12 @@ async def ask_judge(
 
 @router.delete("/api/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_analysis(
-    analysis_id: int, service: AnalysisService = Depends(get_service)
+    analysis_id: int,
+    service: AnalysisService = Depends(get_service),
+    chat: JudgeChatService = Depends(get_chat),
 ) -> Response:
+    if chat.is_busy(analysis_id):
+        raise HTTPException(status.HTTP_409_CONFLICT, detail="the judge is still answering")
     try:
         await service.delete(analysis_id)
     except AnalysisRunning as exc:
