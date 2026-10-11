@@ -155,6 +155,44 @@ class TestDialogueMode:
                 text="монолог", question=None, rounds=1, model=None, mode="dialogue"
             )
 
+    async def test_dialogue_is_anonymized_before_models_and_storage(self):
+        provider = FakeProvider()
+        repo = InMemoryRepository()
+        service = _service(repo=repo, provider=provider)
+        started = await service.start_analysis(
+            text="Иван: Мария, ты не права.\nМария: Иван, один случай — не статистика.",
+            question=None,
+            rounds=1,
+            model=None,
+            mode="auto",
+        )
+        assert started.legend == {"Собеседник А": "Иван", "Собеседник Б": "Мария"}
+        await service.wait(started.id)
+        record = await service.get(started.id)
+        assert record.participants == ["Собеседник А", "Собеседник Б"]
+        assert "Иван" not in record.source_text and "Мария" not in record.source_text
+        assert "Иван" not in record.title
+        for req in provider.calls + provider.structured_calls:
+            assert "Иван" not in req.user and "Мария" not in req.user
+        assert [p.name for p in record.verdict.participants] == record.participants
+
+    async def test_anonymization_can_be_disabled(self):
+        repo = InMemoryRepository()
+        service = _service(repo=repo, settings=_settings(anonymize_participants=False))
+        started = await service.start_analysis(
+            text="Иван: а\nМария: б", question=None, rounds=1, model=None, mode="auto"
+        )
+        assert started.legend == {}
+        assert (await service.get(started.id)).participants == ["Иван", "Мария"]
+
+    async def test_text_mode_has_empty_legend(self):
+        service = _service()
+        started = await service.start_analysis(
+            text="просто текст", question=None, rounds=1, model=None, mode="auto"
+        )
+        assert started.legend == {}
+        await service.wait(started.id)
+
     async def test_restored_events_carry_mode(self):
         repo = InMemoryRepository()
         service = _service(repo=repo)

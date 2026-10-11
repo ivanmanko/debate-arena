@@ -70,3 +70,48 @@ class TestResolveMode:
             resolve_mode("Автор: монолог", "dialogue", line_share=0.6)
         mode, names = resolve_mode(DIALOGUE, "dialogue", line_share=0.6)
         assert mode == "dialogue" and len(names) == 2
+
+
+class TestAnonymize:
+    def test_rewrites_speakers_and_mentions_with_declensions(self):
+        from debate_arena.domain.dialogue import anonymize_dialogue
+
+        text = (
+            "Иван: Мария, ты не права.\n"
+            "Мария: Один случай — не статистика, Иван.\n"
+            "[12:03] **Иван:** Исследования куплены.\n"
+            "Мария: Про Ивана и его соседа: это слова Ивана, а с Марией спорить нечего.\n"
+            "Это продолжение реплики Марии без автора про ИВАНА."
+        )
+        result = anonymize_dialogue(text, ["Иван", "Мария"], language="русский")
+        assert result.participants == ["Собеседник А", "Собеседник Б"]
+        assert result.legend == {"Собеседник А": "Иван", "Собеседник Б": "Мария"}
+        for real in ("Иван", "Мария", "Ивана", "Марией", "ИВАНА", "Марии"):
+            assert real not in result.text, (real, result.text)
+        lines = result.text.splitlines()
+        assert lines[0].startswith("Собеседник А: ")
+        assert lines[1].startswith("Собеседник Б: ")
+        assert lines[2] == "Собеседник А: Исследования куплены."
+        assert "Про Собеседник А и его соседа" in result.text
+        assert "это слова Собеседник А" in result.text
+        assert "с Собеседник Б спорить" in result.text
+        assert "без автора про Собеседник А." in result.text
+
+    def test_short_names_are_replaced_only_exactly(self):
+        from debate_arena.domain.dialogue import anonymize_dialogue
+
+        text = "Аня: Антон анализировал\nБоб: Аня права, антенна"
+        result = anonymize_dialogue(text, ["Аня", "Боб"], language="русский")
+        assert "Антон анализировал" in result.text
+        assert "антенна" in result.text
+        assert "Собеседник А права" in result.text
+
+    def test_english_labels_and_many_participants(self):
+        from debate_arena.domain.dialogue import anonymize_dialogue, participant_label
+
+        assert participant_label(0, "English") == "Participant A"
+        assert participant_label(1, "русский") == "Собеседник Б"
+        assert participant_label(30, "русский") == "Собеседник 31"
+        result = anonymize_dialogue("Ann: hi\nBob: hey", ["Ann", "Bob"], language="English")
+        assert result.participants == ["Participant A", "Participant B"]
+        assert result.text == "Participant A: hi\nParticipant B: hey"

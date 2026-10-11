@@ -58,7 +58,19 @@ class TestCreate:
     def test_accepts_text_and_returns_id(self, client):
         response = client.post("/api/analyses", json={"text": "Тезис.", "rounds": 1})
         assert response.status_code == 202
-        assert response.json() == {"id": 1}
+        assert response.json() == {"id": 1, "legend": {}}
+
+    def test_dialogue_returns_legend_and_stores_placeholders(self, client):
+        body = {"text": "Иван: а\nМария: Иван, б", "rounds": 1}
+        response = client.post("/api/analyses", json=body)
+        assert response.status_code == 202
+        assert response.json()["legend"] == {"Собеседник А": "Иван", "Собеседник Б": "Мария"}
+        analysis_id = response.json()["id"]
+        _events(client, analysis_id)
+        detail = client.get(f"/api/analyses/{analysis_id}").json()
+        assert detail["participants"] == ["Собеседник А", "Собеседник Б"]
+        assert "Иван" not in detail["source_text"]
+        assert "legend" not in detail
 
     @pytest.mark.parametrize(
         "body",
@@ -117,9 +129,10 @@ class TestDetailAndEvents:
         events = _events(client, analysis_id)
         assert events[0][1]["mode"] == "dialogue"
         detail = client.get(f"/api/analyses/{analysis_id}").json()
-        assert detail["mode"] == "dialogue" and detail["participants"] == ["Иван", "Мария"]
+        assert detail["mode"] == "dialogue"
+        assert detail["participants"] == ["Собеседник А", "Собеседник Б"]
         assert detail["verdict"]["closest_to_truth"] in detail["participants"]
-        assert {p["name"] for p in detail["verdict"]["participants"]} == {"Иван", "Мария"}
+        assert {p["name"] for p in detail["verdict"]["participants"]} == set(detail["participants"])
         assert client.get("/api/analyses").json()[0]["mode"] == "dialogue"
 
     def test_detail_missing_is_404(self, client):
