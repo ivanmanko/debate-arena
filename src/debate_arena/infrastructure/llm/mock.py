@@ -6,11 +6,10 @@ import asyncio
 import re
 
 from ...domain.ports import ChatRequest, Completion, ModelT, StructuredCompletion, Usage
-from ...domain.prompts import JUDGE_CHAT_MARKER
+from ...domain.prompts import DIALOGUE_HEADING, JUDGE_CHAT_MARKER
 from ...domain.schemas import ClaimAssessment, Fallacy, ParticipantAssessment, Verdict
 
 CROSS_MARKER = "Принимаю:"
-DIALOGUE_MARKER = "Материал — ДИАЛОГ"
 _LABEL_RE = re.compile(r"\b(?:Собеседник [А-Я]|Participant [A-Z])\b")
 
 # Keys match the lens line ("Твоя линза — …"), not the manifesto, where "ФАКТЫ" also occurs.
@@ -90,7 +89,7 @@ def guess_participants(context: str) -> list[str]:
     A real judge reads the material; the mock only needs a valid shape for the mode.
     """
     names = list(dict.fromkeys(_LABEL_RE.findall(context)))
-    if len(names) < 2 and DIALOGUE_MARKER in context:
+    if len(names) < 2 and DIALOGUE_HEADING in context:
         names = ["Собеседник А", "Собеседник Б"]
     return names if len(names) >= 2 else []
 

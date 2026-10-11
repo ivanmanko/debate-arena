@@ -62,6 +62,10 @@ def analyst_lens(name: str) -> str:
     return _LENSES[name]
 
 
+# Opens the material of a requested dialogue; the mock judge keys its dialogue verdict on it.
+DIALOGUE_HEADING = "Материал — ДИАЛОГ нескольких собеседников:"
+
+
 def source_context(
     text: str, question: str | None, mode: AnalysisMode = "auto", labels: Sequence[str] = ()
 ) -> str:
@@ -70,7 +74,7 @@ def source_context(
     No speaker list: the models identify the speakers themselves (ADR-008).
     """
     heading = {
-        "dialogue": "Материал — ДИАЛОГ нескольких собеседников:",
+        "dialogue": DIALOGUE_HEADING,
         "text": "Текст для разбора:",
         "auto": "Материал для разбора:",
     }[mode]

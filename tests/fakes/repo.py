@@ -10,6 +10,7 @@ from debate_arena.domain.records import (
     ChatMessageRecord,
     ShareRecord,
     TurnRecord,
+    resolved_mode,
 )
 from debate_arena.domain.schemas import Verdict
 
@@ -29,7 +30,6 @@ class InMemoryRepository:
         model_judge: str,
         title: str,
         mode: str = "text",
-        participants: list[str] | None = None,
     ) -> int:
         analysis_id = self._next
         self._next += 1
@@ -39,7 +39,7 @@ class InMemoryRepository:
             source_text=source_text,
             question=question,
             mode=mode,  # type: ignore[arg-type]
-            participants=list(participants or []),
+            participants=[],
             rounds=rounds,
             model_analyst=model_analyst,
             model_judge=model_judge,
@@ -67,7 +67,10 @@ class InMemoryRepository:
         )
 
     async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None:
-        self.rows[analysis_id].verdict = verdict
+        row = self.rows[analysis_id]
+        row.verdict = verdict
+        row.participants = [p.name for p in verdict.participants]
+        row.mode = resolved_mode(row.mode, verdict)
 
     async def add_chat_exchange(
         self, analysis_id: int, question: str, reply: str

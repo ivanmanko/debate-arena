@@ -12,6 +12,7 @@ from debate_arena.config import Settings
 from debate_arena.domain.analysts import ANALYSTS
 from debate_arena.domain.exceptions import ProviderNotConfigured, ProviderRefused
 from debate_arena.domain.ports import ChatRequest
+from debate_arena.domain.prompts import DIALOGUE_HEADING
 from debate_arena.domain.schemas import ModelRef, Verdict, parse_model_ref
 from debate_arena.infrastructure.llm.anthropic import AnthropicProvider
 from debate_arena.infrastructure.llm.deepseek import DeepSeekProvider
@@ -119,7 +120,11 @@ class TestMockProvider:
         assert [p.name for p in labelled.value.participants] == ["Собеседник Б", "Собеседник А"]
         marked = await provider.complete_structured(
             ChatRequest(
-                model="m", system="s", context="Материал — ДИАЛОГ.", user="в", max_tokens=1
+                model="m",
+                system="s",
+                context=f"{DIALOGUE_HEADING}\n«««т»»»",
+                user="в",
+                max_tokens=1,
             ),
             Verdict,
         )
