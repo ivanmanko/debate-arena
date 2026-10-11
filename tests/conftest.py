@@ -1,8 +1,4 @@
-"""Test setup: isolate the DB to a temp SQLite file and force the mock engine.
-
-These env vars must be set *before* debate_arena.config / storage.db are imported,
-so this runs at collection time (conftest is imported before the test modules).
-"""
+"""Test setup: isolated SQLite file and forced mock engine, set before settings load."""
 
 from __future__ import annotations
 
@@ -14,5 +10,5 @@ os.close(_fd)
 
 os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 os.environ["MOCK_LLM"] = "1"
-os.environ["BOT_TOKEN"] = "test:token"
-# Keep the suite fast — no real provider keys, mock engine handles everything.
+os.environ.pop("ANTHROPIC_API_KEY", None)
+os.environ.pop("DEEPSEEK_API_KEY", None)
