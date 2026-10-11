@@ -108,7 +108,9 @@ class AnalysisService:
         if question and len(question) > s.max_question_chars:
             raise ValueError(f"question is longer than {s.max_question_chars} characters")
         rounds = s.default_rounds if rounds is None else rounds
-        input_mode, participants = resolve_mode(text, mode, line_share=s.dialogue_line_share)
+        input_mode, participants = resolve_mode(
+            text, mode, line_share=s.dialogue_line_share, min_messages=s.dialogue_min_messages
+        )
         legend: dict[str, str] = {}
         if input_mode == "dialogue" and s.anonymize_participants:
             anonymized = anonymize_dialogue(text, participants, s.language)

@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     runs_kept_in_memory: int = 50
     # auto mode: share of speaker lines needed to treat the input as a dialogue (SPEC §4.0)
     dialogue_line_share: float = 0.6
+    # auto mode: this many messages from ≥ 2 speakers is a dialogue even with long bodies
+    dialogue_min_messages: int = 4
     # Real participant names never reach the model or the DB (SPEC §4.0b).
     anonymize_participants: bool = True
     bot_token: str = ""
