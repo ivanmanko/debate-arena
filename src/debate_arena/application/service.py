@@ -16,6 +16,7 @@ from dataclasses import dataclass, field
 
 from ..config import Settings
 from ..domain.analysts import build_analysts
+from ..domain.dialogue import RequestedMode, resolve_mode
 from ..domain.events import AnalysisEvent
 from ..domain.exceptions import (
     AnalysisNotFound,
@@ -67,8 +68,15 @@ class AnalysisService:
     # --- commands ---------------------------------------------------------------
 
     async def start(
-        self, *, text: str, question: str | None, rounds: int | None, model: str | None
+        self,
+        *,
+        text: str,
+        question: str | None,
+        rounds: int | None,
+        model: str | None,
+        mode: RequestedMode = "auto",
     ) -> int:
+        """Validate, persist and launch an analysis; returns its id. ``ValueError`` on bad input."""
         s = self._settings
         text = text.strip()
         if not text:
@@ -79,6 +87,7 @@ class AnalysisService:
         if question and len(question) > s.max_question_chars:
             raise ValueError(f"question is longer than {s.max_question_chars} characters")
         rounds = s.default_rounds if rounds is None else rounds
+        input_mode, participants = resolve_mode(text, mode, line_share=s.dialogue_line_share)
         if not 1 <= rounds <= s.max_rounds:
             raise ValueError(f"rounds must be within 1..{s.max_rounds}")
         if model:
@@ -95,6 +104,8 @@ class AnalysisService:
         analysis_id = await self._repo.create(
             source_text=text,
             question=question,
+            mode=input_mode,
+            participants=participants,
             rounds=rounds,
             model_analyst=model_analyst,
             model_judge=model_judge,
@@ -126,6 +137,7 @@ class AnalysisService:
             ),
             persist_verdict=lambda verdict: self._repo.save_verdict(analysis_id, verdict),
             analysis_id=analysis_id,
+            participants=participants,
         )
         run.task = asyncio.create_task(self._execute(analysis_id, run, flow))
         run.task.add_done_callback(_log_task_failure)
@@ -268,6 +280,8 @@ class AnalysisService:
                 "started",
                 {
                     "rounds": record.rounds,
+                    "mode": record.mode,
+                    "participants": record.participants,
                     "analysts": [
                         {"name": a.name, "emoji": a.emoji, "focus": a.focus} for a in self._analysts
                     ],

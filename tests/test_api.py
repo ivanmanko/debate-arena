@@ -70,6 +70,8 @@ class TestCreate:
             {"text": "x", "model": "openai/gpt"},
             {"text": "x", "model": "anthropic/does-not-exist"},
             {"text": "x", "question": "q" * 501},
+            {"text": "x", "mode": "dialogue"},
+            {"text": "x", "mode": "weird"},
         ],
     )
     def test_validation_errors(self, client, body):
@@ -101,10 +103,24 @@ class TestDetailAndEvents:
         detail = client.get(f"/api/analyses/{analysis_id}").json()
         assert detail["status"] == "finished"
         assert detail["source_text"] == "Тезис."
+        assert detail["mode"] == "text" and detail["participants"] == []
         assert len(detail["turns"]) == 6
-        assert detail["verdict"]["most_rational"] in [a["name"] for a in detail["analysts"]]
+        assert detail["verdict"]["closest_to_truth"] is None
+        assert detail["verdict"]["participants"] == []
+        assert detail["verdict"]["consensus"]
         assert detail["duration_ms"] is not None
         assert {t["round_no"] for t in detail["turns"]} == {1, 2}
+
+    def test_dialogue_detail(self, client):
+        body = {"text": "Иван: а\nМария: б\nИван: в", "rounds": 1}
+        analysis_id = client.post("/api/analyses", json=body).json()["id"]
+        events = _events(client, analysis_id)
+        assert events[0][1]["mode"] == "dialogue"
+        detail = client.get(f"/api/analyses/{analysis_id}").json()
+        assert detail["mode"] == "dialogue" and detail["participants"] == ["Иван", "Мария"]
+        assert detail["verdict"]["closest_to_truth"] in detail["participants"]
+        assert {p["name"] for p in detail["verdict"]["participants"]} == {"Иван", "Мария"}
+        assert client.get("/api/analyses").json()[0]["mode"] == "dialogue"
 
     def test_detail_missing_is_404(self, client):
         assert client.get("/api/analyses/404").status_code == 404

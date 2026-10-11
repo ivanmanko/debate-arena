@@ -80,13 +80,21 @@ def _split_long(paragraph: str, limit: int) -> list[str]:
     return pieces
 
 
-def render_started(title: str, analysts: Iterable[AnalystSpec], rounds: int, mock: bool) -> str:
+def render_started(
+    title: str,
+    analysts: Iterable[AnalystSpec],
+    rounds: int,
+    mock: bool,
+    participants: list[str] | None = None,
+) -> str:
     roster = "\n".join(f"{a.emoji} <b>{esc(a.name)}</b> — {esc(a.focus)}" for a in analysts)
     note = "\n\n<i>mock-режим: ключи провайдеров не заданы</i>" if mock else ""
+    kind = f"💬 Диалог: {esc(', '.join(participants))}" if participants else f"📄 {esc(title)}"
     return (
         f"🧭 <b>Проверка здравого смысла</b>\n\n"
-        f"📄 {esc(title)}\n\n"
-        f"Аналитики:\n{roster}\n\nРаундов: {rounds}. Судья подведёт итог.{note}"
+        f"{kind}\n\n"
+        f"Аналитики (одна команда):\n{roster}\n\nРаундов: {rounds}. Судья скажет, что ближе "
+        f"всего к истине.{note}"
     )
 
 
@@ -101,8 +109,7 @@ def render_turn(emoji: str, analyst: str, text: str) -> str:
     return f"{emoji} <b>{esc(analyst)}</b>\n{body}"
 
 
-def render_verdict(verdict: Verdict, analysts: Iterable[AnalystSpec], link: str | None) -> str:
-    emoji_by_name = {a.name: a.emoji for a in analysts}
+def render_verdict(verdict: Verdict, link: str | None) -> str:
     lines = [
         "⚖️ <b>ВЕРДИКТ СУДЬИ</b>",
         "",
@@ -110,7 +117,7 @@ def render_verdict(verdict: Verdict, analysts: Iterable[AnalystSpec], link: str 
         "",
         esc(verdict.conclusion),
         "",
-        f"📊 Рациональность текста: <b>{verdict.rationality_score}/100</b> "
+        f"📊 Рациональность материала: <b>{verdict.rationality_score}/100</b> "
         f"· уверенность судьи {verdict.confidence}%",
     ]
     for title, items in (
@@ -129,23 +136,26 @@ def render_verdict(verdict: Verdict, analysts: Iterable[AnalystSpec], link: str 
     if verdict.fallacies:
         lines += ["", "<b>Уловки</b>"]
         lines += [f"• <b>{esc(f.name)}</b>: «{esc(f.quote)}»" for f in verdict.fallacies]
+    if verdict.participants:
+        lines += ["", f"🎯 <b>Ближе всего к истине: {esc(verdict.closest_to_truth or '—')}</b>"]
+        for p in sorted(verdict.participants, key=lambda x: x.truth_proximity, reverse=True):
+            lines.append(
+                f"<code>{_bar(p.truth_proximity // 10)}</code> {p.truth_proximity:>3} — "
+                f"<b>{esc(p.name)}</b>"
+            )
+            lines.append(f"  ✔ {esc(p.right_about)}")
+            if p.wrong_about:
+                lines.append(f"  ✘ {esc(p.wrong_about)}")
+    if verdict.consensus:
+        lines += ["", "<b>Аналитики сошлись</b>"] + [f"• {esc(i)}" for i in verdict.consensus]
+    if verdict.open_questions:
+        lines += ["", "<b>Осталось открытым</b>"] + [f"• {esc(i)}" for i in verdict.open_questions]
     lines += [
         "",
         f"<b>Сильнейшая версия:</b> {esc(verdict.steelman)}",
         f"<b>Что изменит вердикт:</b> {esc(verdict.falsification)}",
         f"<b>Что из этого следует:</b> {esc(verdict.so_what)}",
-        "",
-        "<b>Аналитики</b>",
     ]
-    for s in sorted(verdict.scores, key=lambda x: x.total, reverse=True):
-        crown = " 👑" if s.analyst == verdict.most_rational else ""
-        lines.append(
-            f"{emoji_by_name.get(s.analyst, '▫️')} <b>{esc(s.analyst)}</b> — {s.total}/40{crown}"
-        )
-        lines.append(f"<code>Строгость {_bar(s.rigor)} {s.rigor:>2}</code>")
-        lines.append(f"<code>Факты     {_bar(s.evidence)} {s.evidence:>2}</code>")
-        lines.append(f"<code>Благожел. {_bar(s.charity)} {s.charity:>2}</code>")
-        lines.append(f"<code>Отзывчив. {_bar(s.responsiveness)} {s.responsiveness:>2}</code>")
     if link:
         lines += ["", f'🔗 <a href="{esc(link)}">Полный разбор в веб-интерфейсе</a>']
     return "\n".join(lines)

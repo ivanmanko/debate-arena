@@ -25,7 +25,7 @@ def _print_verdict(verdict: Verdict) -> None:
     print(f"Вопрос: {verdict.core_question}")
     print(f"Заключение: {verdict.conclusion}")
     print(
-        f"Рациональность текста: {verdict.rationality_score}/100 · "
+        f"Рациональность материала: {verdict.rationality_score}/100 · "
         f"уверенность судьи: {verdict.confidence}%"
     )
     for title, items in (
@@ -47,17 +47,26 @@ def _print_verdict(verdict: Verdict) -> None:
     print(f"\nСильнейшая версия: {verdict.steelman}")
     print(f"Что изменит вердикт: {verdict.falsification}")
     print(f"Что из этого следует: {verdict.so_what}")
-    print("\nАналитики:")
-    for score in verdict.scores:
-        crown = " 👑" if score.analyst == verdict.most_rational else ""
-        print(
-            f"  {score.analyst}{crown}: строгость {score.rigor}, факты {score.evidence}, "
-            f"благожелательность {score.charity}, отзывчивость {score.responsiveness} — "
-            f"{score.note}"
-        )
+    if verdict.participants:
+        print(f"\nБлиже всего к истине: {verdict.closest_to_truth}")
+        for p in sorted(verdict.participants, key=lambda x: x.truth_proximity, reverse=True):
+            print(f"  {p.truth_proximity:>3} — {p.name}: {p.position}")
+            print(f"       ✔ {p.right_about}")
+            if p.wrong_about:
+                print(f"       ✘ {p.wrong_about}")
+    for title, items in (
+        ("Аналитики сошлись", verdict.consensus),
+        ("Открыто", verdict.open_questions),
+    ):
+        if items:
+            print(f"\n{title}:")
+            for item in items:
+                print(f"  • {item}")
 
 
-async def _main(text: str, question: str | None, rounds: int | None, model: str | None) -> int:
+async def _main(
+    text: str, question: str | None, rounds: int | None, model: str | None, mode: str
+) -> int:
     settings = get_settings()
     database = Database(settings.database_url)
     await database.init()
@@ -69,7 +78,13 @@ async def _main(text: str, question: str | None, rounds: int | None, model: str 
     )
     if settings.use_mock:
         print("(mock-режим: ключи провайдеров не заданы)\n", file=sys.stderr)
-    analysis_id = await service.start(text=text, question=question, rounds=rounds, model=model)
+    analysis_id = await service.start(
+        text=text,
+        question=question,
+        rounds=rounds,
+        model=model,
+        mode=mode,  # type: ignore[arg-type]
+    )
     status = "failed"
     try:
         async for event in service.subscribe(analysis_id):
@@ -98,9 +113,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--model", "-m", default=None, help="provider/model, например anthropic/claude-opus-5-5"
     )
+    parser.add_argument("--mode", choices=["auto", "text", "dialogue"], default="auto")
     args = parser.parse_args(argv)
     logging.basicConfig(level=logging.WARNING)
-    return asyncio.run(_main(" ".join(args.text), args.question, args.rounds, args.model))
+    return asyncio.run(
+        _main(" ".join(args.text), args.question, args.rounds, args.model, args.mode)
+    )
 
 
 if __name__ == "__main__":

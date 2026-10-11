@@ -11,8 +11,6 @@ from debate_arena.infrastructure.db.repo import SqlAlchemyAnalysisRepository
 from debate_arena.infrastructure.db.session import Database
 from tests.fakes.llm import make_verdict
 
-NAMES = ["Эмпирик", "Логик", "Стилмен"]
-
 
 @pytest.fixture
 async def repo():
@@ -25,10 +23,12 @@ async def repo():
     os.unlink(path)
 
 
-async def _create(repo, text="Текст", title="Текст") -> int:
+async def _create(repo, text="Текст", title="Текст", participants=None) -> int:
     return await repo.create(
         source_text=text,
         question="вопрос",
+        mode="dialogue" if participants else "text",
+        participants=list(participants or []),
         rounds=2,
         model_analyst="mock/rational",
         model_judge="mock/rational",
@@ -40,7 +40,7 @@ async def test_round_trip_with_turns_and_verdict(repo):
     analysis_id = await _create(repo)
     await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "первая")
     await repo.add_turn(analysis_id, 2, "Логик", "🧩", "вторая")
-    verdict = make_verdict(NAMES)
+    verdict = make_verdict()
     await repo.save_verdict(analysis_id, verdict)
     await repo.finish(analysis_id, "finished", None, 1234)
 
@@ -53,6 +53,16 @@ async def test_round_trip_with_turns_and_verdict(repo):
         (2, "Логик", "вторая"),
     ]
     assert record.verdict == verdict
+    assert record.mode == "text" and record.participants == []
+
+
+async def test_dialogue_participants_round_trip(repo):
+    analysis_id = await _create(repo, participants=["Иван", "Мария"])
+    await repo.save_verdict(analysis_id, make_verdict(["Иван", "Мария"]))
+    record = await repo.get(analysis_id)
+    assert record.mode == "dialogue" and record.participants == ["Иван", "Мария"]
+    assert record.verdict.closest_to_truth == "Иван"
+    assert (await repo.list(limit=1))[0].mode == "dialogue"
 
 
 async def test_get_missing_returns_none(repo):
@@ -62,7 +72,7 @@ async def test_get_missing_returns_none(repo):
 async def test_list_is_newest_first_with_score(repo):
     first = await _create(repo, title="a")
     second = await _create(repo, title="b")
-    await repo.save_verdict(second, make_verdict(NAMES))
+    await repo.save_verdict(second, make_verdict())
     summaries = await repo.list(limit=10)
     assert [s.id for s in summaries] == [second, first]
     assert summaries[0].rationality_score == 61
@@ -73,7 +83,7 @@ async def test_list_is_newest_first_with_score(repo):
 async def test_delete_cascades(repo):
     analysis_id = await _create(repo)
     await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "x")
-    await repo.save_verdict(analysis_id, make_verdict(NAMES))
+    await repo.save_verdict(analysis_id, make_verdict())
     assert await repo.delete(analysis_id) is True
     assert await repo.get(analysis_id) is None
     assert await repo.delete(analysis_id) is False

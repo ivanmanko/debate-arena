@@ -83,6 +83,8 @@ class Settings(BaseSettings):
     title_chars: int = 80
     # Finished runs kept in memory for SSE replay before falling back to the DB.
     runs_kept_in_memory: int = 50
+    # auto mode: share of speaker lines needed to treat the input as a dialogue (SPEC §4.0)
+    dialogue_line_share: float = 0.6
     bot_token: str = ""
     # Shown in bot replies so a chat user can open the full verdict in the web UI.
     public_url: str = ""

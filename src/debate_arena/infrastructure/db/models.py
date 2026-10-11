@@ -24,6 +24,8 @@ class Analysis(Base):
     title: Mapped[str] = mapped_column(Text)  # length bounded by TITLE_CHARS (SPEC §7)
     source_text: Mapped[str] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    mode: Mapped[str] = mapped_column(String(16), default="text")
+    participants: Mapped[str] = mapped_column(Text, default="[]")  # JSON list of names
     rounds: Mapped[int] = mapped_column(Integer)
     model_analyst: Mapped[str] = mapped_column(String(128))
     model_judge: Mapped[str] = mapped_column(String(128))

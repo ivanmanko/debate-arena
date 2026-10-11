@@ -61,6 +61,8 @@ class AnalysisRepository(Protocol):
         *,
         source_text: str,
         question: str | None,
+        mode: str,
+        participants: list[str],
         rounds: int,
         model_analyst: str,
         model_judge: str,

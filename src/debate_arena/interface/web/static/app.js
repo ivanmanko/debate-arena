@@ -21,7 +21,7 @@
   const scoreClass = (v) => (v < 40 ? "s-bad" : v < 70 ? "s-mid" : "s-ok");
   const scoreColor = (v) => (v < 40 ? "var(--bad)" : v < 70 ? "var(--warn)" : "var(--ok)");
 
-  const state = { config: null, analysts: [], colors: {}, history: [], current: null, es: null, timer: null, rounds: 2 };
+  const state = { config: null, analysts: [], colors: {}, history: [], current: null, es: null, timer: null, rounds: 2, mode: "auto" };
 
   // ---------- API ----------
   const api = {
@@ -111,7 +111,21 @@
   // ---------- Compose ----------
   function initCompose() {
     const text = $("#text");
-    text.addEventListener("input", () => { $("#counter").textContent = text.value.length; });
+    const speakerRe = /^\s*(?:\[[^\]]{1,24}\]\s*)?(?:\*\*)?([^\s\[\]<>*:—–][^:—–\n]{0,39}?)(?:\*\*)?\s*(?::|—|–)\s+\S/;
+    const updateModeHint = () => {
+      const lines = text.value.split("\n").filter((l) => l.trim());
+      const names = new Set(lines.map((l) => (l.match(speakerRe) || [])[1]).filter(Boolean));
+      const share = lines.length ? lines.filter((l) => speakerRe.test(l)).length / lines.length : 0;
+      const looksDialogue = names.size >= 2 && share >= 0.6;
+      $("#mode-hint").textContent = state.mode === "auto" ? (looksDialogue ? `· похоже на диалог: ${[...names].slice(0, 4).join(", ")}` : "· похоже на текст") : "";
+    };
+    text.addEventListener("input", () => { $("#counter").textContent = text.value.length; updateModeHint(); });
+    $("#mode").addEventListener("click", (e) => {
+      const b = e.target.closest("button[data-mode]"); if (!b) return;
+      state.mode = b.dataset.mode;
+      for (const x of $("#mode").children) x.classList.toggle("active", x === b);
+      updateModeHint();
+    });
     $("#rounds").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-rounds]"); if (!b) return;
       state.rounds = Number(b.dataset.rounds);
@@ -123,7 +137,7 @@
     $("#compose").addEventListener("submit", async (e) => {
       e.preventDefault();
       const err = $("#compose-error"); err.classList.add("hidden");
-      const body = { text: text.value, question: $("#question").value || null, rounds: state.rounds, model: $("#model").value };
+      const body = { text: text.value, question: $("#question").value || null, rounds: state.rounds, model: $("#model").value, mode: state.mode };
       if (!body.text.trim()) { err.textContent = "Вставьте текст для разбора."; err.classList.remove("hidden"); return; }
       $("#submit").disabled = true;
       try {
@@ -166,12 +180,19 @@
     $("[data-title]", node).textContent = d.title;
     setStatus(node, d.status);
     $("[data-meta]", node).append(
+      el("span", { text: d.mode === "dialogue" ? "Диалог" : "Текст" }),
       el("span", { text: `Модель: ${d.model_analyst}` }),
       el("span", { text: `Раундов: ${d.rounds}` }),
       el("span", { text: `Символов: ${d.source_text.length}` }),
       el("span", { "data-duration": "", text: d.duration_ms ? `Время: ${fmtMs(d.duration_ms)}` : "" }),
     );
     $("[data-text]", node).textContent = d.source_text;
+    if (d.mode === "dialogue") {
+      const box = $("[data-participants]", node);
+      box.append(el("span", { class: "muted small", text: "Диалог:" }));
+      for (const name of d.participants) box.append(el("span", { class: "pchip", text: name }));
+      box.classList.remove("hidden");
+    }
     if (d.question) { const q = $("[data-question]", node); q.textContent = `Вопрос: ${d.question}`; q.classList.remove("hidden"); }
     const progress = $("[data-progress]", node);
     for (const a of state.analysts) {
@@ -285,10 +306,10 @@
     const slot = $("[data-verdict]"); if (!slot) return; slot.innerHTML = "";
     const card = el("div", { class: "card verdict" });
     const gauge = el("div", { class: "gauge", style: `--g:${v.rationality_score};--g-color:${scoreColor(v.rationality_score)}` }, [
-      el("div", { class: "g-val", text: v.rationality_score }), el("div", { class: "g-lbl", text: "рациональность\nтекста" }),
+      el("div", { class: "g-val", text: v.rationality_score }), el("div", { class: "g-lbl", text: "рациональность\nматериала" }),
     ]);
     const main = el("div", { class: "verdict-main" }, [
-      el("h2", { text: "⚖️ Вердикт судьи" }),
+      el("h2", { text: "⚖️ Вердикт судьи · что ближе всего к истине" }),
       el("p", { class: "core", text: v.core_question }),
       el("p", { class: "conclusion", text: v.conclusion }),
       el("div", { class: "confidence" }, [el("span", { text: `Уверенность судьи: ${v.confidence}%` }), el("div", { class: "bar" }, [el("i", { style: `width:${v.confidence}%` })])]),
@@ -317,18 +338,29 @@
       el("div", { class: "v-mini" }, [el("h4", { text: "Что из этого следует" }), el("p", { text: v.so_what })]),
     ])]));
 
-    const scores = el("div", { class: "scores" });
-    for (const s of v.scores) {
-      const a = state.analysts.find((x) => x.name === s.analyst);
-      const total = s.rigor + s.evidence + s.charity + s.responsiveness;
-      const row = (label, val) => el("div", { class: "score-row" }, [el("span", { text: label }), el("div", { class: "bar" }, [el("i", { style: `width:${val * 10}%` })]), el("span", { text: val })]);
-      scores.append(el("div", { class: `score-card ${s.analyst === v.most_rational ? "winner" : ""}`, style: `--a-color:${state.colors[s.analyst] || "var(--border)"}` }, [
-        el("div", { class: "sc-head" }, [el("span", { text: `${a ? a.emoji + " " : ""}${s.analyst}${s.analyst === v.most_rational ? " 👑" : ""}` }), el("span", { class: "sc-total", text: `${total} / 40` })]),
-        row("Строгость", s.rigor), row("Факты", s.evidence), row("Благожелательность", s.charity), row("Отзывчивость", s.responsiveness),
-        el("p", { class: "sc-note", text: s.note }),
+    if (v.participants.length) {
+      const people = el("div", { class: "people" });
+      const palette = ["var(--a1)", "var(--a2)", "var(--a3)", "var(--judge)"];
+      [...v.participants].sort((a, b) => b.truth_proximity - a.truth_proximity).forEach((p, i) => {
+        people.append(el("div", { class: `person ${p.name === v.closest_to_truth ? "closest" : ""}`, style: `--p-color:${palette[i % palette.length]}` }, [
+          el("div", { class: "p-head" }, [el("span", { text: p.name }), el("span", { class: "p-score", text: p.truth_proximity })]),
+          el("div", { class: "bar" }, [el("i", { style: `width:${p.truth_proximity}%` })]),
+          el("p", { text: p.position }),
+          el("p", { class: "ok", text: p.right_about }),
+          p.wrong_about ? el("p", { class: "bad", text: p.wrong_about }) : null,
+          el("p", { class: "p-note", text: p.note }),
+        ]));
+      });
+      card.append(el("div", { class: "v-section" }, [
+        el("h3", { text: "Собеседники · близость к истине" }),
+        el("p", { class: "truth-banner", html: `Ближе всего к истине: <span>${esc(v.closest_to_truth || "—")}</span>` }),
+        people,
       ]));
     }
-    card.append(el("div", { class: "v-section" }, [el("h3", { text: `Аналитики · самая рациональная линия: ${v.most_rational}` }), scores]));
+    card.append(el("div", { class: "v-three" }, [
+      el("div", { class: "v-mini" }, [el("h4", { text: "На чём сошлись аналитики" }), v.consensus.length ? el("ul", {}, v.consensus.map((i) => el("li", { text: i }))) : el("p", { class: "muted small", text: "—" })]),
+      el("div", { class: "v-mini" }, [el("h4", { text: "Осталось открытым" }), v.open_questions.length ? el("ul", {}, v.open_questions.map((i) => el("li", { text: i }))) : el("p", { class: "muted small", text: "—" })]),
+    ]));
 
     const foot = el("div", { class: "v-foot" }, [
       el("span", { class: "stats", "data-stats": "", text: detail?.duration_ms ? `Время разбора: ${fmtMs(detail.duration_ms)}` : "" }),
@@ -351,16 +383,22 @@
   function toMarkdown(d) {
     const v = d.verdict; const lines = [`# Разбор #${d.id}: ${d.title}`, "", "## Исходный текст", "", d.source_text, ""];
     if (d.question) lines.push(`**Вопрос:** ${d.question}`, "");
+    if (d.mode === "dialogue") lines.push(`**Собеседники:** ${d.participants.join(", ")}`, "");
     let round = 0;
     for (const t of d.turns) { if (t.round_no !== round) { round = t.round_no; lines.push(`## Раунд ${round}`, ""); } lines.push(`### ${t.emoji} ${t.analyst}`, "", t.text, ""); }
     if (v) {
-      lines.push("## ⚖️ Вердикт судьи", "", `**Вопрос:** ${v.core_question}`, "", `**Заключение:** ${v.conclusion}`, "", `Рациональность текста: **${v.rationality_score}/100** · уверенность судьи: ${v.confidence}%`, "");
+      lines.push("## ⚖️ Вердикт судьи", "", `**Вопрос:** ${v.core_question}`, "", `**Ближе всего к истине:** ${v.conclusion}`, "", `Рациональность материала: **${v.rationality_score}/100** · уверенность судьи: ${v.confidence}%`, "");
       const list = (t, items) => { lines.push(`### ${t}`, ""); for (const i of items) lines.push(`- ${i}`); if (!items.length) lines.push("—"); lines.push(""); };
       list("Установлено", v.established); list("Вероятно", v.probable); list("Неопределённо", v.uncertain);
       if (v.claims.length) { lines.push("### Утверждения", "", "| Утверждение | Статус | Почему |", "|---|---|---|"); for (const c of v.claims) lines.push(`| ${c.claim} | ${c.status} | ${c.note} |`); lines.push(""); }
       if (v.fallacies.length) { lines.push("### Уловки", ""); for (const f of v.fallacies) lines.push(`- **${f.name}** — «${f.quote}»: ${f.explanation}`); lines.push(""); }
-      lines.push(`**Сильнейшая версия:** ${v.steelman}`, "", `**Что изменит вердикт:** ${v.falsification}`, "", `**Что из этого следует:** ${v.so_what}`, "", "### Аналитики", "");
-      for (const s of v.scores) lines.push(`- ${s.analyst}${s.analyst === v.most_rational ? " 👑" : ""}: строгость ${s.rigor}, факты ${s.evidence}, благожелательность ${s.charity}, отзывчивость ${s.responsiveness} — ${s.note}`);
+      lines.push(`**Сильнейшая версия:** ${v.steelman}`, "", `**Что изменит вердикт:** ${v.falsification}`, "", `**Что из этого следует:** ${v.so_what}`, "");
+      if (v.participants.length) {
+        lines.push(`### Ближе всего к истине: ${v.closest_to_truth}`, "");
+        for (const p of [...v.participants].sort((a, b) => b.truth_proximity - a.truth_proximity)) lines.push(`- **${p.name}** — ${p.truth_proximity}/100. ${p.position} ✔ ${p.right_about}${p.wrong_about ? ` ✘ ${p.wrong_about}` : ""}`);
+        lines.push("");
+      }
+      list("На чём сошлись аналитики", v.consensus); list("Осталось открытым", v.open_questions);
     }
     return lines.join("\n");
   }

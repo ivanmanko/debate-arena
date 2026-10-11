@@ -27,7 +27,7 @@ def _config(rounds: int = 2) -> FlowConfig:
     )
 
 
-async def _run(rounds: int = 2, provider: FakeProvider | None = None, judge=None):
+async def _run(rounds: int = 2, provider: FakeProvider | None = None, judge=None, participants=()):
     provider = provider or FakeProvider()
     judge = judge or provider
     events: list[AnalysisEvent] = []
@@ -52,6 +52,7 @@ async def _run(rounds: int = 2, provider: FakeProvider | None = None, judge=None
         emit=emit,
         persist_turn=persist_turn,
         persist_verdict=persist_verdict,
+        participants=participants,
     )
     result = await flow.run()
     return result, events, persisted, provider
@@ -107,6 +108,7 @@ class TestEvents:
         _, events, _, _ = await _run(rounds=2)
         started = events[0].data
         assert started["rounds"] == 2
+        assert started["mode"] == "text" and started["participants"] == []
         assert [a["name"] for a in started["analysts"]] == NAMES
         assert all(a["emoji"] and a["focus"] for a in started["analysts"])
 
@@ -124,19 +126,37 @@ class TestEvents:
 
 
 class TestJudge:
-    async def test_judge_gets_transcript_and_all_names(self):
-        _, _, _, provider = await _run(rounds=1)
+    async def test_judge_gets_transcript_and_text_mode_verdict(self):
+        result, _, _, provider = await _run(rounds=1)
         assert len(provider.structured_calls) == 1
         req = provider.structured_calls[0]
         assert req.model == "fake/j" and req.max_tokens == 200 and req.effort == "high"
         assert "[Раунд 1]" in req.user
-        assert ", ".join(NAMES) in req.user
+        assert "Собеседники:" not in req.user
+        assert result.verdict.participants == [] and result.verdict.closest_to_truth is None
+
+    async def test_dialogue_mode_threads_participants_to_prompts_and_verdict(self):
+        people = ["Иван", "Мария"]
+        result, events, _, provider = await _run(rounds=2, participants=people)
+        for req in provider.calls:
+            assert "Собеседники: Иван, Мария." in req.user
+        assert "Собеседники: Иван, Мария." in provider.structured_calls[0].user
+        assert [p.name for p in result.verdict.participants] == people
+        assert result.verdict.closest_to_truth in people
+        assert events[0].data["mode"] == "dialogue" and events[0].data["participants"] == people
+
+    async def test_dialogue_verdict_missing_a_participant_is_invalid(self):
+        from tests.fakes.llm import make_verdict
+
+        judge = FakeProvider(verdict=make_verdict(["Иван"]))
+        with pytest.raises(InvalidVerdict):
+            await _run(rounds=1, judge=judge, participants=["Иван", "Мария"])
 
     async def test_invalid_verdict_is_retried_once(self):
         judge = FakeProvider(fail_structured_times=1)
         result, events, persisted, _ = await _run(rounds=1, judge=judge)
         assert len(judge.structured_calls) == 2
-        assert result.verdict.most_rational in NAMES
+        assert result.verdict.conclusion
         assert persisted["verdict"] is result.verdict
         assert events[-1].type == "verdict"
 
@@ -145,10 +165,10 @@ class TestJudge:
         with pytest.raises(InvalidVerdict):
             await _run(rounds=1, judge=judge)
 
-    async def test_verdict_with_wrong_names_is_invalid(self):
+    async def test_text_mode_verdict_with_participants_is_invalid(self):
         from tests.fakes.llm import make_verdict
 
-        judge = FakeProvider(verdict=make_verdict(["Кто-то", "Ещё кто-то", "Третий"]))
+        judge = FakeProvider(verdict=make_verdict(["Кто-то", "Ещё кто-то"]))
         with pytest.raises(InvalidVerdict):
             await _run(rounds=1, judge=judge)
 

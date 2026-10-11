@@ -46,7 +46,8 @@ class AnalystSpec(BaseModel):
 
 
 class ClaimAssessment(BaseModel):
-    claim: str = Field(description="Ключевое утверждение из текста, своими словами")
+    claim: str = Field(description="Ключевое утверждение, своими словами")
+    by: str | None = Field(default=None, description="Кто утверждал (имя собеседника в диалоге)")
     status: ClaimStatus = Field(
         description="supported — доказано; plausible — вероятно по Оккаму; "
         "unsupported — без доказательств; unfalsifiable — непроверяемо; false — опровергнуто"
@@ -58,27 +59,26 @@ class Fallacy(BaseModel):
     name: str = Field(description="Название уловки: ad hominem, соломенное чучело, …")
     quote: str = Field(description="Цитата или точный пересказ места в тексте")
     explanation: str = Field(description="В чём именно ошибка")
+    by: str | None = Field(default=None, description="Кто допустил (имя собеседника в диалоге)")
 
 
-class AnalystScore(BaseModel):
-    analyst: str
-    rigor: int = Field(ge=1, le=10, description="Строгость рассуждения")
-    evidence: int = Field(ge=1, le=10, description="Работа с фактами и бременем доказывания")
-    charity: int = Field(ge=1, le=10, description="Благожелательность и стилменнинг")
-    responsiveness: int = Field(ge=1, le=10, description="Отвечал ли коллегам, менял ли позицию")
-    note: str = Field(description="Одна ёмкая фраза об этом аналитике")
+class ParticipantAssessment(BaseModel):
+    """How close one dialogue participant's picture is to the truth — not who argued better."""
 
-    @property
-    def total(self) -> int:
-        return self.rigor + self.evidence + self.charity + self.responsiveness
+    name: str = Field(description="Имя собеседника ровно как в диалоге")
+    truth_proximity: int = Field(ge=0, le=100, description="Насколько позиция близка к истине")
+    position: str = Field(description="Позиция собеседника своими словами, в сильнейшей форме")
+    right_about: str = Field(description="Что у него верно (обязательно, даже если в целом неправ)")
+    wrong_about: str = Field(description="Главная ошибка; пустая строка, если её нет")
+    note: str = Field(description="Одна фраза-итог по этому собеседнику")
 
 
 class Verdict(BaseModel):
-    """Judge's structured verdict — SPEC §3.3."""
+    """Judge's structured verdict — SPEC §3.3. Seeks the truth, never a winner."""
 
     core_question: str = Field(description="Нейтральная формулировка предмета, без эмоций")
-    conclusion: str = Field(description="Самое рациональное заключение по тексту")
-    rationality_score: int = Field(ge=0, le=100, description="Рациональность исходного текста")
+    conclusion: str = Field(description="То, что ближе всего к истине по итогам разбора")
+    rationality_score: int = Field(ge=0, le=100, description="Рациональность исходного материала")
     confidence: int = Field(ge=0, le=100, description="Уверенность судьи в заключении")
     established: list[str] = Field(description="Что доказано строго")
     probable: list[str] = Field(description="Рациональная рабочая гипотеза по Оккаму")
@@ -88,8 +88,16 @@ class Verdict(BaseModel):
     steelman: str = Field(description="Сильнейшая версия позиции автора")
     falsification: str = Field(description="Что должно появиться, чтобы вердикт изменился")
     so_what: str = Field(description="Практическое следствие для разумного человека")
-    scores: list[AnalystScore] = Field(description="Ровно по одной оценке на аналитика")
-    most_rational: str = Field(description="Имя аналитика с самой рациональной линией")
+    consensus: list[str] = Field(description="На чём аналитики сошлись после перекрёстной проверки")
+    open_questions: list[str] = Field(
+        description="Где аналитики не сошлись или что осталось открытым"
+    )
+    participants: list[ParticipantAssessment] = Field(
+        description="Диалог: по одной записи на каждого собеседника; текст: пустой список"
+    )
+    closest_to_truth: str | None = Field(
+        description="Диалог: имя собеседника, чья картина ближе всего к истине; текст: null"
+    )
 
     @field_validator("conclusion", "core_question")
     @classmethod
@@ -98,13 +106,23 @@ class Verdict(BaseModel):
             raise ValueError("must not be blank")
         return value.strip()
 
-    def validate_for(self, analyst_names: list[str]) -> None:
-        """Invariants from SPEC §3.3 that the JSON schema alone cannot express."""
-        scored = [s.analyst for s in self.scores]
-        if sorted(scored) != sorted(analyst_names):
-            raise InvalidVerdict(f"scores must cover exactly {analyst_names}, got {scored}")
-        if self.most_rational not in analyst_names:
-            raise InvalidVerdict(f"most_rational {self.most_rational!r} is not an analyst")
+    def validate_for(self, participant_names: list[str]) -> None:
+        """Invariants from SPEC §3.3 that the JSON schema alone cannot express.
 
-    def score_for(self, analyst: str) -> AnalystScore | None:
-        return next((s for s in self.scores if s.analyst == analyst), None)
+        ``participant_names`` is empty in text mode and lists every speaker in dialogue mode.
+        """
+        assessed = [p.name for p in self.participants]
+        if sorted(assessed) != sorted(participant_names):
+            raise InvalidVerdict(
+                f"participants must cover exactly {participant_names}, got {assessed}"
+            )
+        if participant_names:
+            if self.closest_to_truth not in participant_names:
+                raise InvalidVerdict(
+                    f"closest_to_truth {self.closest_to_truth!r} is not a participant"
+                )
+        elif self.closest_to_truth is not None:
+            raise InvalidVerdict("closest_to_truth must be null in text mode")
+
+    def participant(self, name: str) -> ParticipantAssessment | None:
+        return next((p for p in self.participants if p.name == name), None)

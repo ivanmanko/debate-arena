@@ -5,6 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
+from .dialogue import InputMode
 from .schemas import Verdict
 
 AnalysisStatus = Literal["running", "finished", "failed"]
@@ -23,6 +24,8 @@ class AnalysisRecord(BaseModel):
     title: str
     source_text: str
     question: str | None
+    mode: InputMode
+    participants: list[str]
     rounds: int
     model_analyst: str
     model_judge: str
@@ -40,6 +43,7 @@ class AnalysisSummary(BaseModel):
     title: str
     status: AnalysisStatus
     created_at: datetime
+    mode: InputMode
     rounds: int
     model_analyst: str
     rationality_score: int | None
@@ -52,6 +56,7 @@ class AnalysisSummary(BaseModel):
             title=record.title,
             status=record.status,
             created_at=record.created_at,
+            mode=record.mode,
             rounds=record.rounds,
             model_analyst=record.model_analyst,
             rationality_score=record.verdict.rationality_score if record.verdict else None,

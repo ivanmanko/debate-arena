@@ -70,7 +70,9 @@ async def _run(
     bot: Bot, chat_id: int, text: str, service: AnalysisService, settings: Settings
 ) -> None:
     try:
-        analysis_id = await service.start(text=text, question=None, rounds=None, model=None)
+        analysis_id = await service.start(
+            text=text, question=None, rounds=None, model=None, mode="auto"
+        )
     except ValueError as exc:
         await bot.send_message(chat_id, f"Не могу разобрать: {presenter.esc(str(exc))}")
         return
@@ -82,7 +84,9 @@ async def _run(
     await _say(
         bot,
         chat_id,
-        presenter.render_started(record.title, service.analysts, record.rounds, settings.use_mock),
+        presenter.render_started(
+            record.title, service.analysts, record.rounds, settings.use_mock, record.participants
+        ),
     )
     async for event in service.subscribe(analysis_id):
         if event.type == "round":
@@ -101,6 +105,6 @@ async def _run(
             )
         elif event.type == "verdict":
             verdict = Verdict.model_validate(event.data)
-            await _say(bot, chat_id, presenter.render_verdict(verdict, service.analysts, link))
+            await _say(bot, chat_id, presenter.render_verdict(verdict, link))
         elif event.type == "error":
             await _say(bot, chat_id, presenter.render_error(event.data["message"]))

@@ -88,4 +88,3 @@ def run() -> None:
     )
     settings = get_settings()
     uvicorn.run(create_app(settings), host=settings.web_host, port=settings.web_port)
-

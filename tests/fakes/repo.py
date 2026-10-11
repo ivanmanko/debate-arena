@@ -22,6 +22,8 @@ class InMemoryRepository:
         model_analyst: str,
         model_judge: str,
         title: str,
+        mode: str = "text",
+        participants: list[str] | None = None,
     ) -> int:
         analysis_id = self._next
         self._next += 1
@@ -30,6 +32,8 @@ class InMemoryRepository:
             title=title,
             source_text=source_text,
             question=question,
+            mode=mode,  # type: ignore[arg-type]
+            participants=list(participants or []),
             rounds=rounds,
             model_analyst=model_analyst,
             model_judge=model_judge,

@@ -9,15 +9,29 @@ from tests.fakes.llm import make_verdict
 NAMES = [a.name for a in ANALYSTS]
 
 
-def test_verdict_card_contains_key_sections_and_crown():
-    verdict = make_verdict(NAMES, most_rational=NAMES[1])
-    card = presenter.render_verdict(verdict, ANALYSTS, link="https://example.org/#/a/7")
+def test_text_verdict_card_has_no_winner_and_no_analyst_scores():
+    card = presenter.render_verdict(make_verdict(), link="https://example.org/#/a/7")
     assert "ВЕРДИКТ СУДЬИ" in card
     assert "61/100" in card
-    assert "👑" in card and NAMES[1] in card
-    assert "█" in card and "░" in card
+    assert "👑" not in card and "Ближе всего к истине" not in card
+    for name in NAMES:
+        assert name not in card
+    assert "Аналитики сошлись" in card and "Осталось открытым" in card
     assert 'href="https://example.org/#/a/7"' in card
     assert "Что изменит вердикт" in card
+
+
+def test_dialogue_verdict_card_ranks_participants_by_truth_proximity():
+    card = presenter.render_verdict(make_verdict(["Иван", "Мария"]), link=None)
+    assert "Ближе всего к истине: Иван" in card
+    assert card.index("Иван</b>") < card.index("Мария</b>")
+    assert "✔" in card and "✘" in card
+    assert "█" in card
+
+
+def test_started_mentions_dialogue_participants():
+    text = presenter.render_started("t", ANALYSTS, 2, False, ["Иван", "Мария"])
+    assert "Диалог: Иван, Мария" in text and "одна команда" in text
 
 
 def test_turn_escapes_html_and_bolds_markers():

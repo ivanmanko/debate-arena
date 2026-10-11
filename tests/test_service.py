@@ -121,6 +121,50 @@ class TestStartAndRun:
         assert events[-1].type == "done" and events[-1].data["status"] == "failed"
 
 
+class TestDialogueMode:
+    DIALOGUE = "Иван: Земля плоская.\nМария: Нет, есть фото из космоса.\nИван: Они подделаны."
+
+    async def test_auto_detects_dialogue_and_persists_participants(self):
+        repo = InMemoryRepository()
+        service = _service(repo=repo)
+        analysis_id = await service.start(
+            text=self.DIALOGUE, question=None, rounds=1, model=None, mode="auto"
+        )
+        await service.wait(analysis_id)
+        record = await service.get(analysis_id)
+        assert record.mode == "dialogue" and record.participants == ["Иван", "Мария"]
+        assert [p.name for p in record.verdict.participants] == ["Иван", "Мария"]
+        assert record.verdict.closest_to_truth in record.participants
+        events = await _collect(service, analysis_id)
+        assert events[0].data["mode"] == "dialogue"
+
+    async def test_forced_text_mode_ignores_speakers(self):
+        service = _service()
+        analysis_id = await service.start(
+            text=self.DIALOGUE, question=None, rounds=1, model=None, mode="text"
+        )
+        await service.wait(analysis_id)
+        record = await service.get(analysis_id)
+        assert record.mode == "text" and record.participants == []
+        assert record.verdict.participants == []
+
+    async def test_forced_dialogue_without_speakers_is_rejected(self):
+        service = _service()
+        with pytest.raises(ValueError, match="Имя: реплика"):
+            await service.start(
+                text="монолог", question=None, rounds=1, model=None, mode="dialogue"
+            )
+
+    async def test_restored_events_carry_mode(self):
+        repo = InMemoryRepository()
+        service = _service(repo=repo)
+        analysis_id = await service.start(text=self.DIALOGUE, question=None, rounds=1, model=None)
+        await service.wait(analysis_id)
+        events = await _collect(_service(repo=repo), analysis_id)
+        assert events[0].data["mode"] == "dialogue"
+        assert events[0].data["participants"] == ["Иван", "Мария"]
+
+
 class TestEvents:
     async def test_subscribe_streams_until_done(self):
         service = _service()

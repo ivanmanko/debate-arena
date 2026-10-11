@@ -4,9 +4,9 @@ from __future__ import annotations
 
 import asyncio
 
-from ...domain.analysts import ANALYSTS
 from ...domain.ports import ChatRequest, Completion, ModelT, StructuredCompletion, Usage
-from ...domain.schemas import AnalystScore, ClaimAssessment, Fallacy, Verdict
+from ...domain.prompts import participants_from_prompt
+from ...domain.schemas import ClaimAssessment, Fallacy, ParticipantAssessment, Verdict
 
 CROSS_MARKER = "Принимаю:"
 
@@ -63,12 +63,13 @@ class MockProvider:
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]:
         await asyncio.sleep(self._delay)
-        verdict = mock_verdict()
+        verdict = mock_verdict(participants_from_prompt(request.user))
         return StructuredCompletion(value=verdict, usage=Usage(), raw=verdict.model_dump_json())  # type: ignore[arg-type]
 
 
-def mock_verdict() -> Verdict:
-    names = [a.name for a in ANALYSTS]
+def mock_verdict(participants: list[str] | None = None) -> Verdict:
+    """Canned verdict; with participants it becomes a dialogue verdict."""
+    names = participants or []
     return Verdict(
         core_question="Подтверждается ли главный тезис текста проверяемыми фактами?",
         conclusion=(
@@ -103,31 +104,21 @@ def mock_verdict() -> Verdict:
         steelman="Наблюдение реально и заслуживает объяснения; автор прав, что его нельзя отмахнуть.",
         falsification="Воспроизводимые измерения, подтверждающие тезис автора.",
         so_what="Не принимать тезис на веру; при желании проверить — измерить, а не смотреть.",
-        scores=[
-            AnalystScore(
-                analyst=names[0],
-                rigor=8,
-                evidence=9,
-                charity=7,
-                responsiveness=8,
-                note="Точно про бремя доказывания.",
-            ),
-            AnalystScore(
-                analyst=names[1],
-                rigor=9,
-                evidence=7,
-                charity=7,
-                responsiveness=8,
-                note="Нашёл скрытую посылку.",
-            ),
-            AnalystScore(
-                analyst=names[2],
-                rigor=8,
-                evidence=7,
-                charity=9,
-                responsiveness=7,
-                note="Лучший стилмен.",
-            ),
+        consensus=[
+            "Исходное наблюдение реально, но тезис из него не следует.",
+            "Более простая модель объясняет наблюдение без лишних допущений.",
         ],
-        most_rational=names[1],
+        open_questions=["Какие именно данные автор считал бы достаточными?"],
+        participants=[
+            ParticipantAssessment(
+                name=name,
+                truth_proximity=max(15, 80 - 35 * i),
+                position=f"Позиция {name} в сильнейшей форме.",
+                right_about=f"{name} прав(а) в том, что наблюдение существует.",
+                wrong_about="" if i == 0 else f"{name} делает вывод из одного случая.",
+                note=f"{name}: картина {'ближе' if i == 0 else 'дальше'} к истине.",
+            )
+            for i, name in enumerate(names)
+        ],
+        closest_to_truth=names[0] if names else None,
     )

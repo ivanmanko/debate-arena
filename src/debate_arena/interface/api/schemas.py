@@ -5,6 +5,7 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 from ...config import ModelOption
+from ...domain.dialogue import InputMode, RequestedMode
 from ...domain.records import AnalysisSummary, TurnRecord
 from ...domain.schemas import Verdict
 
@@ -14,6 +15,7 @@ class AnalysisRequest(BaseModel):
     question: str | None = None  # length validated by the service against settings
     rounds: int | None = Field(default=None, ge=1)
     model: str | None = None
+    mode: RequestedMode = "auto"
 
 
 class AnalysisCreated(BaseModel):
@@ -31,6 +33,8 @@ class AnalysisDetail(BaseModel):
     title: str
     source_text: str
     question: str | None
+    mode: InputMode
+    participants: list[str]
     rounds: int
     model_analyst: str
     model_judge: str

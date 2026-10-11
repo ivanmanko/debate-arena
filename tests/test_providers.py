@@ -90,11 +90,15 @@ class TestMockProvider:
             replies.add((await provider.complete(request)).text)
         assert len(replies) == 3
 
-    async def test_structured_returns_verdict_for_all_analysts(self):
-        provider = MockProvider()
-        result = await provider.complete_structured(_request(), Verdict)
-        result.value.validate_for(NAMES)
-        assert result.value.most_rational in NAMES
+    async def test_structured_returns_text_or_dialogue_verdict(self):
+        provider = MockProvider(delay_s=0)
+        text_result = await provider.complete_structured(_request(), Verdict)
+        text_result.value.validate_for([])
+        dialogue = await provider.complete_structured(
+            _request("…\nСобеседники: Иван, Мария.\n«««"), Verdict
+        )
+        dialogue.value.validate_for(["Иван", "Мария"])
+        assert dialogue.value.closest_to_truth == "Иван"
 
 
 class TestDeepSeekProvider:
@@ -136,7 +140,7 @@ class TestDeepSeekProvider:
 
     async def test_structured_uses_json_mode_and_parses_verdict(self):
         seen: dict = {}
-        payload = make_verdict(NAMES).model_dump_json()
+        payload = make_verdict().model_dump_json()
 
         def handler(request: httpx.Request) -> httpx.Response:
             seen["body"] = json.loads(request.content)
@@ -217,7 +221,7 @@ class TestAnthropicProvider:
             await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=9))
 
     async def test_structured_uses_parse_and_parsed_output(self):
-        verdict = make_verdict(NAMES)
+        verdict = make_verdict()
         response = SimpleNamespace(
             stop_reason="end_turn",
             stop_details=None,

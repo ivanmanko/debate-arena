@@ -13,7 +13,7 @@
       <span class="brand-mark">⚖️</span>
       <span class="brand-text">
         <span class="brand-title">Проверка здравого смысла</span>
-        <span class="brand-sub">три рациональных аналитика и судья</span>
+        <span class="brand-sub">три рациональных аналитика ищут истину</span>
       </span>
     </a>
     <div class="topbar-actions">
@@ -43,7 +43,7 @@
         <form id="compose" class="card compose">
           <label class="field">
             <span class="label">Текст для разбора</span>
-            <textarea id="text" rows="9" placeholder="Вставьте пост, статью, аргумент или тезис. Аналитики разберут его по Манифесту здравого смысла: факты против интерпретаций, бремя доказывания, бритва Оккама, уловки, сильнейшая версия…" required></textarea>
+            <textarea id="text" rows="9" placeholder="Вставьте текст — пост, статью, тезис — или диалог в формате «Имя: реплика». Аналитики разберут его по Манифесту здравого смысла, а судья скажет, что ближе всего к истине (в диалоге — чья позиция)." required></textarea>
             <span class="counter"><span id="counter">0</span> / <span id="counter-max">20000</span></span>
           </label>
           <label class="field">
@@ -51,6 +51,14 @@
             <input id="question" type="text" maxlength="500" placeholder="Например: верен ли главный вывод автора?">
           </label>
           <div class="compose-row">
+            <div class="field">
+              <span class="label">Материал <span id="mode-hint" class="muted"></span></span>
+              <div id="mode" class="segmented" role="radiogroup">
+                <button type="button" data-mode="auto" class="active" title="Распознать диалог автоматически">Авто</button>
+                <button type="button" data-mode="text" title="Один автор">Текст</button>
+                <button type="button" data-mode="dialogue" title="Несколько собеседников, реплики «Имя: текст»">Диалог</button>
+              </div>
+            </div>
             <div class="field">
               <span class="label">Глубина</span>
               <div id="rounds" class="segmented" role="radiogroup">
@@ -77,7 +85,7 @@
           <ol class="steps">
             <li><b>Независимый разбор.</b> Каждый аналитик разбирает текст, не видя коллег — чтобы не якориться на чужом ответе.</li>
             <li><b>Перекрёстная проверка.</b> Аналитики читают друг друга: явно принимают рациональные доводы, оспаривают ошибки, уточняют позицию.</li>
-            <li><b>Вердикт судьи.</b> Что доказано, что вероятно, что непроверяемо, какие уловки найдены — и что самое рациональное.</li>
+            <li><b>Вердикт судьи.</b> Не «кто победил», а что ближе всего к истине: доказанное, вероятное, непроверяемое, уловки, на чём аналитики сошлись. Для диалога — насколько каждый собеседник близок к истине и что у каждого верно.</li>
           </ol>
         </section>
       </section>
@@ -101,6 +109,7 @@
           <span class="status" data-status></span>
         </div>
         <div class="meta" data-meta></div>
+        <div class="participants hidden" data-participants></div>
         <details class="source-text">
           <summary>Исходный текст</summary>
           <p data-text></p>

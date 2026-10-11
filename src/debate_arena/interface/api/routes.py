@@ -37,7 +37,11 @@ async def create_analysis(
 ) -> AnalysisCreated:
     try:
         analysis_id = await service.start(
-            text=body.text, question=body.question, rounds=body.rounds, model=body.model
+            text=body.text,
+            question=body.question,
+            rounds=body.rounds,
+            model=body.model,
+            mode=body.mode,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

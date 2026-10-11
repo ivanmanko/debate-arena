@@ -77,9 +77,11 @@ class AnalysisFlow:
         persist_turn: PersistTurn | None = None,
         persist_verdict: PersistVerdict | None = None,
         analysis_id: int | None = None,
+        participants: Sequence[str] = (),
     ) -> None:
         self.text = text
         self.question = question
+        self.participants = list(participants)
         self.analysts = list(analysts)
         self.analyst_provider = analyst_provider
         self.judge_provider = judge_provider
@@ -99,6 +101,8 @@ class AnalysisFlow:
                 "started",
                 {
                     "rounds": self.config.rounds,
+                    "mode": "dialogue" if self.participants else "text",
+                    "participants": self.participants,
                     "analysts": [
                         {"name": a.name, "emoji": a.emoji, "focus": a.focus} for a in self.analysts
                     ],
@@ -119,7 +123,9 @@ class AnalysisFlow:
 
     async def _round_one(self) -> None:
         await self.emit(AnalysisEvent("round", {"round_no": 1, "kind": ROUND_ONE_KIND}))
-        user = round_one_user(self.text, self.question, self.config.language)
+        user = round_one_user(
+            self.text, self.question, self.config.language, self.participants or None
+        )
         semaphore = asyncio.Semaphore(self.config.concurrency)
 
         async def one(analyst: AnalystSpec) -> tuple[AnalystSpec, str]:
@@ -141,7 +147,12 @@ class AnalysisFlow:
         await self.emit(AnalysisEvent("round", {"round_no": round_no, "kind": CROSS_ROUND_KIND}))
         for analyst in self.analysts:
             user = cross_round_user(
-                self.text, self.question, self.transcript.render(), round_no, self.config.language
+                self.text,
+                self.question,
+                self.transcript.render(),
+                round_no,
+                self.config.language,
+                self.participants or None,
             )
             text = await self._analyst_turn(analyst, user, round_no)
             await self._record_turn(round_no, analyst, text)
@@ -193,7 +204,6 @@ class AnalysisFlow:
         await self.emit(
             AnalysisEvent("typing", {"analyst": JUDGE_NAME, "emoji": JUDGE_EMOJI, "role": "judge"})
         )
-        names = [a.name for a in self.analysts]
         # Providers without native structured output need the schema in the prompt;
         # Anthropic gets it through ``output_format`` instead.
         schema_text = (
@@ -206,7 +216,7 @@ class AnalysisFlow:
                 self.text,
                 self.question,
                 self.transcript.render(),
-                names,
+                self.participants,
                 self.config.language,
                 json_schema=schema_text,
             ),
@@ -226,7 +236,7 @@ class AnalysisFlow:
                     self.judge_provider.name,
                     self.config.judge_model,
                 )
-                result.value.validate_for(names)
+                result.value.validate_for(self.participants)
             except InvalidVerdict as exc:
                 last_error = exc
                 logger.warning("judge attempt %s invalid: %s", attempt, exc)

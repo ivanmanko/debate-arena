@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from datetime import UTC, datetime
 
 from sqlalchemy import select, update
@@ -24,6 +25,8 @@ class SqlAlchemyAnalysisRepository:
         *,
         source_text: str,
         question: str | None,
+        mode: str,
+        participants: list[str],
         rounds: int,
         model_analyst: str,
         model_judge: str,
@@ -34,6 +37,8 @@ class SqlAlchemyAnalysisRepository:
                 title=title,
                 source_text=source_text,
                 question=question,
+                mode=mode,
+                participants=json.dumps(participants, ensure_ascii=False),
                 rounds=rounds,
                 model_analyst=model_analyst,
                 model_judge=model_judge,
@@ -108,6 +113,7 @@ class SqlAlchemyAnalysisRepository:
                     title=row.title,
                     status=row.status,
                     created_at=_utc(row.created_at),
+                    mode=row.mode,
                     rounds=row.rounds,
                     model_analyst=row.model_analyst,
                     rationality_score=score,
@@ -149,6 +155,8 @@ def _to_record(row: Analysis) -> AnalysisRecord:
         title=row.title,
         source_text=row.source_text,
         question=row.question,
+        mode=row.mode,
+        participants=list(json.loads(row.participants or "[]")),
         rounds=row.rounds,
         model_analyst=row.model_analyst,
         model_judge=row.model_judge,
