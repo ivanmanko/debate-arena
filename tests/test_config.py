@@ -14,7 +14,7 @@ def test_defaults_mirror_spec_section_7():
     s = _settings()
     assert s.model_analyst == "anthropic/claude-opus-5-5"
     assert s.model_judge == "anthropic/claude-opus-5-5"
-    assert (s.default_rounds, s.max_rounds, s.max_text_chars) == (2, 3, 20_000)
+    assert (s.default_rounds, s.max_rounds, s.max_text_chars) == (2, 3, 200_000)
     assert (s.turn_max_tokens, s.judge_max_tokens) == (6_000, 16_000)
     assert (s.analyst_effort, s.judge_effort) == ("medium", "high")
     assert s.deepseek_temperature == 0.3

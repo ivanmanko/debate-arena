@@ -426,7 +426,7 @@ class TestConfigAndHealth:
         assert config["default_model"] == "mock/rational"
         assert [m["id"] for m in config["models"]] == ["mock/rational"]
         assert config["default_rounds"] == 2 and config["max_rounds"] == 3
-        assert config["max_text_chars"] == 20_000
+        assert config["max_text_chars"] == 200_000
         assert (config["chat_max_chars"], config["chat_max_messages"]) == (2_000, 20)
         assert config["share_backend"] == "local"
         assert len(config["analysts"]) == 3

@@ -64,6 +64,19 @@ class TestStartAndRun:
         with pytest.raises(ValueError):
             await service.start(text="   ", question=None, rounds=1, model=None)
 
+    async def test_long_text_reaches_every_call_whole(self):
+        # SPEC §6 №2: a text within MAX_TEXT_CHARS is never cut on the way to the models.
+        provider = FakeProvider()
+        service = _service(provider=provider)
+        text = "Абзац длинного диалога. " * 7_000 + "ПОСЛЕДНЯЯ ФРАЗА."
+        assert 150_000 < len(text) <= 200_000
+        analysis_id = await service.start(text=text, question=None, rounds=2, model=None)
+        await service.wait(analysis_id)
+        assert (await service.get(analysis_id)).source_text == text
+        requests = provider.calls + provider.structured_calls
+        assert len(requests) == 7
+        assert all(text in r.user for r in requests)
+
     async def test_explicit_model_is_used_for_analysts_and_judge(self):
         seen: list[str] = []
         provider = FakeProvider()
