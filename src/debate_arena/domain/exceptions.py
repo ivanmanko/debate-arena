@@ -35,5 +35,17 @@ class ChatUnavailable(RationalCheckError):
     """The judge cannot take a message now: no verdict, a reply in progress, or the limit."""
 
 
+class ShareUnavailable(RationalCheckError):
+    """Only a finished analysis with a verdict can be published (SPEC §4.7)."""
+
+
+class ShareNotFound(RationalCheckError):
+    """The analysis is not published."""
+
+
+class PublishError(RationalCheckError):
+    """The snapshot storage failed; nothing was changed in the database."""
+
+
 class AnalysisRunning(RationalCheckError):
     """Operation not allowed while the analysis is still running."""

@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
@@ -13,10 +13,11 @@ from ...domain.records import (
     AnalysisRecord,
     AnalysisSummary,
     ChatMessageRecord,
+    ShareRecord,
     TurnRecord,
 )
 from ...domain.schemas import Verdict
-from .models import Analysis, JudgeMessage, Turn, VerdictRow
+from .models import Analysis, JudgeMessage, ShareRow, Turn, VerdictRow
 
 
 class SqlAlchemyAnalysisRepository:
@@ -91,6 +92,21 @@ class SqlAlchemyAnalysisRepository:
             await session.commit()
             return _to_chat_message(rows[0]), _to_chat_message(rows[1])
 
+    async def save_share(self, analysis_id: int, key: str, url: str) -> ShareRecord:
+        async with self._sessions() as session:
+            row = ShareRow(analysis_id=analysis_id, key=key, url=url)
+            session.add(row)
+            await session.commit()
+            return _to_share(row)
+
+    async def delete_share(self, analysis_id: int) -> bool:
+        async with self._sessions() as session:
+            result = await session.execute(
+                delete(ShareRow).where(ShareRow.analysis_id == analysis_id)
+            )
+            await session.commit()
+            return bool(result.rowcount)
+
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int
     ) -> None:
@@ -116,6 +132,7 @@ class SqlAlchemyAnalysisRepository:
                     selectinload(Analysis.turns),
                     selectinload(Analysis.verdict),
                     selectinload(Analysis.chat),
+                    selectinload(Analysis.share),
                 )
             )
             return _to_record(row) if row else None
@@ -148,7 +165,7 @@ class SqlAlchemyAnalysisRepository:
             row = await session.get(Analysis, analysis_id)
             if row is None:
                 return False
-            await session.delete(row)  # cascades to turns, verdict and chat via ORM
+            await session.delete(row)  # cascades to turns, verdict, chat and share via ORM
             await session.commit()
             return True
 
@@ -198,8 +215,13 @@ def _to_record(row: Analysis) -> AnalysisRecord:
         ],
         verdict=Verdict.model_validate_json(row.verdict.payload) if row.verdict else None,
         chat=[_to_chat_message(m) for m in row.chat],
+        share=_to_share(row.share) if row.share else None,
     )
 
 
 def _to_chat_message(row: JudgeMessage) -> ChatMessageRecord:
     return ChatMessageRecord(role=row.role, text=row.text, created_at=_utc(row.created_at))
+
+
+def _to_share(row: ShareRow) -> ShareRecord:
+    return ShareRecord(key=row.key, url=row.url, created_at=_utc(row.created_at))

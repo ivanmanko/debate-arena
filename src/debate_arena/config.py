@@ -82,6 +82,12 @@ class Settings(BaseSettings):
     # Frees the per-analysis lock if a reply hangs; the SDK's own timeout is minutes.
     judge_chat_timeout_s: float = 180.0
 
+    # --- Public snapshots (SPEC §4.7, §7, ADR-006) ---
+    share_bucket: str = ""  # GCS bucket; empty → local directory served at /shared/
+    share_dir: str = "./shared"
+    share_token_bytes: int = 16  # 128 bits: the link cannot be guessed
+    share_cache_max_age_s: int = 60  # how long a withdrawn page may linger in caches
+
     # --- Storage / web / bot ---
     database_url: str = "sqlite+aiosqlite:///./debate_arena.db"
     web_host: str = "127.0.0.1"
@@ -146,6 +152,10 @@ class Settings(BaseSettings):
             parse_model_ref(self.model_judge).provider,
         )
         return not all(self.has_key(p) for p in providers)
+
+    @property
+    def share_backend(self) -> Literal["gcs", "local"]:
+        return "gcs" if self.share_bucket else "local"
 
     @property
     def effective_model_analyst(self) -> str:

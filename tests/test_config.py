@@ -21,7 +21,8 @@ def test_defaults_mirror_spec_section_7():
     assert (s.judge_chat_effort, s.judge_chat_max_tokens) == ("medium", 6_000)
     assert (s.judge_chat_max_chars, s.judge_chat_max_messages) == (2_000, 20)
     assert s.judge_chat_timeout_s == 180.0
-    assert (s.share_bucket, s.share_dir) == ("", "./shared")
+    assert s.share_bucket == ""
+    assert Settings.model_fields["share_dir"].default == "./shared"  # conftest overrides env
     assert (s.share_token_bytes, s.share_cache_max_age_s) == (16, 60)
 
 

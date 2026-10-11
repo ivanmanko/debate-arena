@@ -28,6 +28,14 @@ class ChatMessageRecord(BaseModel):
     created_at: datetime
 
 
+class ShareRecord(BaseModel):
+    """A published snapshot of an analysis (SPEC §2, §4.7). ``key`` names the stored object."""
+
+    key: str
+    url: str
+    created_at: datetime
+
+
 class AnalysisRecord(BaseModel):
     id: int
     title: str
@@ -46,6 +54,7 @@ class AnalysisRecord(BaseModel):
     turns: list[TurnRecord]
     verdict: Verdict | None
     chat: list[ChatMessageRecord] = []
+    share: ShareRecord | None = None
 
 
 class AnalysisSummary(BaseModel):

@@ -1,5 +1,5 @@
-"""SQLAlchemy models: Analysis, Turn, VerdictRow, JudgeMessage. Verdict payload is stored as
-JSON text exactly as the ``Verdict`` Pydantic model serialises it (SPEC §2)."""
+"""SQLAlchemy models: Analysis, Turn, VerdictRow, JudgeMessage, ShareRow. Verdict payload is
+stored as JSON text exactly as the ``Verdict`` Pydantic model serialises it (SPEC §2)."""
 
 from __future__ import annotations
 
@@ -43,6 +43,9 @@ class Analysis(Base):
     )
     chat: Mapped[list[JudgeMessage]] = relationship(
         back_populates="analysis", cascade="all, delete-orphan", order_by="JudgeMessage.id"
+    )
+    share: Mapped[ShareRow | None] = relationship(
+        back_populates="analysis", cascade="all, delete-orphan", uselist=False
     )
 
 
@@ -92,3 +95,19 @@ class JudgeMessage(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
     analysis: Mapped[Analysis] = relationship(back_populates="chat")
+
+
+class ShareRow(Base):
+    """Published snapshot of an analysis (SPEC §4.7, ADR-006); created by ``create_all``."""
+
+    __tablename__ = "analysis_shares"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    analysis_id: Mapped[int] = mapped_column(
+        ForeignKey("analyses.id", ondelete="CASCADE"), unique=True
+    )
+    key: Mapped[str] = mapped_column(String(64), unique=True)
+    url: Mapped[str] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
+
+    analysis: Mapped[Analysis] = relationship(back_populates="share")

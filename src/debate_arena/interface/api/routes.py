@@ -8,6 +8,7 @@ from fastapi.responses import StreamingResponse
 from ... import __version__
 from ...application.chat import JudgeChatService
 from ...application.service import AnalysisService
+from ...application.share import ShareService
 from ...config import Settings
 from ...domain.exceptions import (
     AnalysisNotFound,
@@ -16,6 +17,9 @@ from ...domain.exceptions import (
     ProviderError,
     ProviderNotConfigured,
     ProviderRefused,
+    PublishError,
+    ShareNotFound,
+    ShareUnavailable,
 )
 from .schemas import (
     AnalysisCreated,
@@ -27,6 +31,7 @@ from .schemas import (
     ChatRequestIn,
     ConfigOut,
     HealthOut,
+    ShareOut,
 )
 from .sse import sse_stream
 
@@ -39,6 +44,10 @@ def get_service(request: Request) -> AnalysisService:
 
 def get_chat(request: Request) -> JudgeChatService:
     return request.app.state.chat
+
+
+def get_share(request: Request) -> ShareService:
+    return request.app.state.share
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -81,10 +90,13 @@ async def get_analysis(
     except AnalysisNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
     return AnalysisDetail(
-        **record.model_dump(exclude={"turns", "verdict", "chat"}),
+        **record.model_dump(exclude={"turns", "verdict", "chat", "share"}),
         turns=record.turns,
         verdict=record.verdict,
         chat=record.chat,
+        share=ShareOut(url=record.share.url, created_at=record.share.created_at)
+        if record.share
+        else None,
         analysts=[AnalystOut(name=a.name, emoji=a.emoji, focus=a.focus) for a in service.analysts],
     )
 
@@ -130,20 +142,51 @@ async def ask_judge(
     return ChatExchangeOut(question=exchange.question, reply=exchange.reply)
 
 
+@router.post("/api/analyses/{analysis_id}/share", response_model=ShareOut)
+async def publish_analysis(analysis_id: int, share: ShareService = Depends(get_share)) -> ShareOut:
+    try:
+        record = await share.publish(analysis_id)
+    except AnalysisNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
+    except ShareUnavailable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except PublishError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return ShareOut(url=record.url, created_at=record.created_at)
+
+
+@router.delete("/api/analyses/{analysis_id}/share", status_code=status.HTTP_204_NO_CONTENT)
+async def withdraw_analysis(analysis_id: int, share: ShareService = Depends(get_share)) -> Response:
+    try:
+        await share.withdraw(analysis_id)
+    except AnalysisNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
+    except ShareNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis is not published") from exc
+    except PublishError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.delete("/api/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_analysis(
     analysis_id: int,
     service: AnalysisService = Depends(get_service),
     chat: JudgeChatService = Depends(get_chat),
+    share: ShareService = Depends(get_share),
 ) -> Response:
     if chat.is_busy(analysis_id):
         raise HTTPException(status.HTTP_409_CONFLICT, detail="the judge is still answering")
     try:
+        # A public page must not outlive its analysis: withdraw first, keep it on failure.
+        await share.withdraw_if_shared(analysis_id)
         await service.delete(analysis_id)
     except AnalysisRunning as exc:
         raise HTTPException(status.HTTP_409_CONFLICT, detail="analysis is still running") from exc
     except AnalysisNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
+    except PublishError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -163,6 +206,7 @@ async def get_config(
         analysts=[AnalystOut(name=a.name, emoji=a.emoji, focus=a.focus) for a in service.analysts],
         chat_max_chars=settings.judge_chat_max_chars,
         chat_max_messages=settings.judge_chat_max_messages,
+        share_backend=settings.share_backend,
     )
 
 

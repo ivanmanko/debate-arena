@@ -1,6 +1,7 @@
 """API DTOs (SPEC §3). Embeds domain models rather than redefining their fields."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -31,6 +32,13 @@ class AnalystOut(BaseModel):
     focus: str
 
 
+class ShareOut(BaseModel):
+    """Public snapshot link (SPEC §3.6a); the storage key stays on the server."""
+
+    url: str
+    created_at: datetime
+
+
 class AnalysisDetail(BaseModel):
     id: int
     title: str
@@ -50,6 +58,7 @@ class AnalysisDetail(BaseModel):
     turns: list[TurnRecord]
     verdict: Verdict | None
     chat: list[ChatMessageRecord]
+    share: ShareOut | None = None
 
 
 AnalysisSummaryOut = AnalysisSummary
@@ -78,6 +87,7 @@ class ConfigOut(BaseModel):
     analysts: list[AnalystOut]
     chat_max_chars: int
     chat_max_messages: int
+    share_backend: Literal["gcs", "local"]
 
 
 class HealthOut(BaseModel):

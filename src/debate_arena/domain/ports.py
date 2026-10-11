@@ -7,7 +7,7 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from .records import AnalysisRecord, AnalysisSummary, ChatMessageRecord
+from .records import AnalysisRecord, AnalysisSummary, ChatMessageRecord, ShareRecord
 from .schemas import Verdict
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -85,6 +85,12 @@ class AnalysisRepository(Protocol):
         self, analysis_id: int, status: str, error: str | None, duration_ms: int
     ) -> None: ...
 
+    async def save_share(self, analysis_id: int, key: str, url: str) -> ShareRecord: ...
+
+    async def delete_share(self, analysis_id: int) -> bool:
+        """False when the analysis is missing or not published."""
+        ...
+
     async def get(self, analysis_id: int) -> AnalysisRecord | None: ...
 
     async def list(self, limit: int) -> list[AnalysisSummary]: ...
@@ -92,3 +98,17 @@ class AnalysisRepository(Protocol):
     async def delete(self, analysis_id: int) -> bool: ...
 
     async def mark_interrupted(self) -> int: ...
+
+
+class SnapshotPublisher(Protocol):
+    """Public storage for analysis snapshots (ADR-006). Errors surface as ``PublishError``."""
+
+    backend: str  # "gcs" | "local", reported in GET /api/config
+
+    async def publish(self, key: str, html: str) -> str:
+        """Store the page under ``key`` and return its public URL."""
+        ...
+
+    async def unpublish(self, key: str) -> None:
+        """Remove the page; a missing object is not an error."""
+        ...

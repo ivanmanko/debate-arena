@@ -16,6 +16,7 @@ dependencies = [
     "asyncpg>=0.29",
     "pydantic>=2.8,<3",
     "pydantic-settings>=2.4,<3",
+    "google-cloud-storage>=3,<4",  # public snapshots in a GCS bucket (ADR-006)
 ]
 
 [dependency-groups]

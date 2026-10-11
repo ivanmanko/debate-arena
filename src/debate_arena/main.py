@@ -17,12 +17,16 @@ from fastapi.staticfiles import StaticFiles
 from . import __version__
 from .application.chat import JudgeChatService
 from .application.service import AnalysisService, ProviderFactory
+from .application.share import ShareService
 from .config import Settings, get_settings
-from .domain.ports import AnalysisRepository
+from .domain.ports import AnalysisRepository, SnapshotPublisher
 from .infrastructure.db.repo import SqlAlchemyAnalysisRepository
 from .infrastructure.db.session import Database
 from .infrastructure.llm.factory import ProviderRegistry
+from .infrastructure.share.factory import build_publisher
+from .infrastructure.share.local import SHARED_PATH
 from .interface.api.routes import router
+from .interface.share.page import render_snapshot
 
 logger = logging.getLogger(__name__)
 
@@ -34,9 +38,11 @@ def create_app(
     *,
     repo: AnalysisRepository | None = None,
     provider_factory: ProviderFactory | None = None,
+    publisher: SnapshotPublisher | None = None,
 ) -> FastAPI:
-    """Build the app. Tests inject an in-memory repo and a fake provider factory."""
+    """Build the app. Tests inject an in-memory repo, a fake provider factory and publisher."""
     settings = settings or get_settings()
+    snapshot_publisher = publisher or build_publisher(settings)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
@@ -54,6 +60,12 @@ def create_app(
         app.state.service = service
         app.state.chat = JudgeChatService(
             repo=active_repo, provider_factory=factory, settings=settings
+        )
+        app.state.share = ShareService(
+            repo=active_repo,
+            publisher=snapshot_publisher,
+            render=lambda record: render_snapshot(record, service.analysts),
+            token_bytes=settings.share_token_bytes,
         )
         if settings.use_mock:
             logger.warning("No provider key for the selected models (or MOCK_LLM=1) — mock engine")
@@ -73,6 +85,14 @@ def create_app(
 
     app = FastAPI(title="Rational Check", version=__version__, lifespan=lifespan)
     app.include_router(router)
+
+    if settings.share_backend == "local":
+        # Snapshots without GCS (SPEC §4.7); the directory appears on the first publish.
+        app.mount(
+            SHARED_PATH,
+            StaticFiles(directory=settings.share_dir, check_dir=False),
+            name="shared",
+        )
 
     if STATIC_DIR.is_dir():
         app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
