@@ -175,6 +175,71 @@ class TestListAndDelete:
             _events(c, analysis_id)  # let it finish before the app shuts down
 
 
+class TestChat:
+    def _finished(self, client, text="Тезис."):
+        analysis_id = client.post("/api/analyses", json={"text": text, "rounds": 1}).json()["id"]
+        _events(client, analysis_id)
+        return analysis_id
+
+    def test_ask_returns_exchange_and_detail_has_chat(self, client):
+        analysis_id = self._finished(client)
+        assert client.get(f"/api/analyses/{analysis_id}").json()["chat"] == []
+        response = client.post(f"/api/analyses/{analysis_id}/chat", json={"text": "Почему?"})
+        assert response.status_code == 200
+        body = response.json()
+        assert body["question"]["role"] == "user" and body["question"]["text"] == "Почему?"
+        assert body["reply"]["role"] == "judge" and body["reply"]["text"]
+        assert body["reply"]["created_at"]
+        chat = client.get(f"/api/analyses/{analysis_id}").json()["chat"]
+        assert [m["role"] for m in chat] == ["user", "judge"]
+
+    def test_dialogue_legend_anonymizes_question(self, client):
+        created = client.post(
+            "/api/analyses", json={"text": "Иван: а\nМария: б\nИван: в", "rounds": 1}
+        ).json()
+        _events(client, created["id"])
+        response = client.post(
+            f"/api/analyses/{created['id']}/chat",
+            json={"text": "Иван прав?", "legend": created["legend"]},
+        )
+        assert response.json()["question"]["text"] == "Собеседник А прав?"
+
+    def test_missing_is_404(self, client):
+        assert client.post("/api/analyses/404/chat", json={"text": "x"}).status_code == 404
+
+    @pytest.mark.parametrize("body", [{"text": ""}, {"text": "   "}, {}, {"text": "x" * 2001}])
+    def test_validation_is_422(self, client, body):
+        analysis_id = self._finished(client)
+        assert client.post(f"/api/analyses/{analysis_id}/chat", json=body).status_code == 422
+
+    def test_running_analysis_is_409(self):
+        app = create_app(
+            _settings(), repo=InMemoryRepository(), provider_factory=lambda model: SlowProvider()
+        )
+        with TestClient(app) as c:
+            analysis_id = c.post("/api/analyses", json={"text": "t", "rounds": 1}).json()["id"]
+            response = c.post(f"/api/analyses/{analysis_id}/chat", json={"text": "?"})
+            assert response.status_code == 409
+            _events(c, analysis_id)
+
+    def test_provider_failure_is_502_and_nothing_saved(self):
+        class FailingChat(FakeProvider):
+            async def complete(self, request: ChatRequest) -> Completion:
+                if "ОБСУЖДЕНИЕ ВЕРДИКТА" in request.system:
+                    raise RuntimeError("upstream 500")
+                return await super().complete(request)
+
+        app = create_app(
+            _settings(), repo=InMemoryRepository(), provider_factory=lambda model: FailingChat()
+        )
+        with TestClient(app) as c:
+            analysis_id = self._finished(c)
+            response = c.post(f"/api/analyses/{analysis_id}/chat", json={"text": "?"})
+            assert response.status_code == 502
+            assert "upstream 500" in response.json()["detail"]
+            assert c.get(f"/api/analyses/{analysis_id}").json()["chat"] == []
+
+
 class TestConfigAndHealth:
     def test_config_exposes_models_defaults_and_analysts(self, client):
         config = client.get("/api/config").json()
@@ -183,6 +248,7 @@ class TestConfigAndHealth:
         assert [m["id"] for m in config["models"]] == ["mock/rational"]
         assert config["default_rounds"] == 2 and config["max_rounds"] == 3
         assert config["max_text_chars"] == 20_000
+        assert (config["chat_max_chars"], config["chat_max_messages"]) == (2_000, 20)
         assert len(config["analysts"]) == 3
         assert all(a["emoji"] and a["focus"] for a in config["analysts"])
 

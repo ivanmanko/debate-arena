@@ -80,10 +80,26 @@ async def test_list_is_newest_first_with_score(repo):
     assert len(await repo.list(limit=1)) == 1
 
 
+async def test_chat_messages_round_trip_in_order(repo):
+    analysis_id = await _create(repo)
+    assert (await repo.get(analysis_id)).chat == []
+    question = await repo.add_chat_message(analysis_id, "user", "Почему?")
+    reply = await repo.add_chat_message(analysis_id, "judge", "Потому что.")
+    assert (question.role, question.text) == ("user", "Почему?")
+    assert reply.created_at.tzinfo is not None
+    record = await repo.get(analysis_id)
+    assert [(m.role, m.text) for m in record.chat] == [
+        ("user", "Почему?"),
+        ("judge", "Потому что."),
+    ]
+    assert record.chat[0].created_at.tzinfo is not None
+
+
 async def test_delete_cascades(repo):
     analysis_id = await _create(repo)
     await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "x")
     await repo.save_verdict(analysis_id, make_verdict())
+    await repo.add_chat_message(analysis_id, "user", "q")
     assert await repo.delete(analysis_id) is True
     assert await repo.get(analysis_id) is None
     assert await repo.delete(analysis_id) is False

@@ -18,6 +18,8 @@ def test_defaults_mirror_spec_section_7():
     assert (s.turn_max_tokens, s.judge_max_tokens) == (6_000, 16_000)
     assert (s.analyst_effort, s.judge_effort) == ("medium", "high")
     assert s.deepseek_temperature == 0.3
+    assert (s.judge_chat_effort, s.judge_chat_max_tokens) == ("medium", 6_000)
+    assert (s.judge_chat_max_chars, s.judge_chat_max_messages) == (2_000, 20)
 
 
 def test_no_keys_means_mock():
@@ -58,3 +60,5 @@ def test_tiny_token_budgets_fail_fast_with_a_readable_message():
         _settings(turn_max_tokens=450)
     with pytest.raises(ValueError, match="JUDGE_MAX_TOKENS=900"):
         _settings(judge_max_tokens=900)
+    with pytest.raises(ValueError, match="JUDGE_CHAT_MAX_TOKENS=500"):
+        _settings(judge_chat_max_tokens=500)
