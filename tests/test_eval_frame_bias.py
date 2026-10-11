@@ -94,6 +94,12 @@ class TestMetrics:
         other.open_questions.append("Верен ли сам Манифест?")
         assert frame_flagged(other)
 
+    def test_frame_idioms_and_plain_manifesto_citations_do_not_count(self):
+        verdict = make_verdict(["Собеседник А", "Собеседник Б"])
+        verdict.narrative += "\n\nВ рамках разбора тезис выходит за рамки данных."
+        verdict.participants[1].wrong_about = "Нарушает п. 3 Манифеста."
+        assert not frame_flagged(verdict)
+
     def test_summary_gap_order_effect_and_shares(self):
         summary = summarize(
             [

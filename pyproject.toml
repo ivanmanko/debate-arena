@@ -52,6 +52,7 @@ known-first-party = ["debate_arena", "evals", "tests"]
 # Prompt text is intentionally kept as long, readable literal lines.
 "src/debate_arena/domain/prompts.py" = ["E501"]
 "src/debate_arena/infrastructure/llm/mock.py" = ["E501"]
+"evals/frame_bias/cases.py" = ["E501"]
 
 [tool.pytest.ini_options]
 pythonpath = ["src", "."]
