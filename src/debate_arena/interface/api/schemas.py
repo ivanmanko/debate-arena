@@ -20,6 +20,9 @@ class AnalysisRequest(BaseModel):
 
 class AnalysisCreated(BaseModel):
     id: int
+    legend: dict[str, str] = Field(
+        default_factory=dict, description="placeholder → real name; returned once, never stored"
+    )
 
 
 class AnalystOut(BaseModel):

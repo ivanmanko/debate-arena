@@ -1,4 +1,4 @@
-"""Dialogue parsing and input-mode detection (SPEC §4.0)."""
+"""Dialogue parsing, input-mode detection and participant anonymisation (SPEC §4.0, §4.0b)."""
 
 from __future__ import annotations
 
@@ -27,6 +27,12 @@ _SPEAKER_PATTERNS = [
     ),
 ]
 _URL_RE = re.compile(r"^(https?:|www\.)", re.IGNORECASE)
+
+_RU_LETTERS = "АБВГДЕЖЗИКЛМНОПРСТУФХЦЧШЭЮЯ"
+_EN_LETTERS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_VOWELS = set("аеёиоуыэюяaeiouy")
+# A name stem shorter than this is replaced only as an exact word (SPEC §4.0b).
+_MIN_STEM = 3
 
 
 @dataclass
@@ -94,3 +100,52 @@ def resolve_mode(
     if len(names) >= 2 and speaker_line_share(text) >= line_share:
         return "dialogue", names
     return "text", []
+
+
+@dataclass(frozen=True)
+class AnonymizedDialogue:
+    text: str
+    participants: list[str]
+    legend: dict[str, str]  # placeholder → real name; never persisted server-side
+
+
+def participant_label(index: int, language: str) -> str:
+    """``Собеседник А`` / ``Participant A``; numbers once the alphabet runs out."""
+    russian = language.strip().lower().startswith(("рус", "ru"))
+    letters = _RU_LETTERS if russian else _EN_LETTERS
+    word = "Собеседник" if russian else "Participant"
+    suffix = letters[index] if index < len(letters) else str(index + 1)
+    return f"{word} {suffix}"
+
+
+def _mention_pattern(name: str) -> re.Pattern[str]:
+    """Match the name and its inflected forms (SPEC §4.0b), case-insensitively."""
+    alternatives: list[str] = [re.escape(name)]
+    for token in name.split():
+        stem = token[:-1] if token[-1].lower() in _VOWELS else token
+        if len(stem) >= _MIN_STEM:
+            alternatives.append(rf"{re.escape(stem)}\w{{0,3}}")
+        elif len(token) >= _MIN_STEM:
+            alternatives.append(re.escape(token))
+    alternatives.sort(key=len, reverse=True)
+    return re.compile(r"\b(?:" + "|".join(alternatives) + r")\b", re.IGNORECASE)
+
+
+def anonymize_dialogue(text: str, participants: list[str], language: str) -> AnonymizedDialogue:
+    """Rewrite speaker lines as ``<label>: text`` and replace in-text mentions of names."""
+    mapping = {name: participant_label(i, language) for i, name in enumerate(participants)}
+    rebuilt: list[str] = []
+    for raw in text.splitlines():
+        spoken = _speaker_of(raw.strip())
+        if spoken and spoken[0] in mapping:
+            rebuilt.append(f"{mapping[spoken[0]]}: {spoken[1]}")
+        else:
+            rebuilt.append(raw)
+    result = "\n".join(rebuilt)
+    for name in sorted(mapping, key=len, reverse=True):
+        result = _mention_pattern(name).sub(mapping[name], result)
+    return AnonymizedDialogue(
+        text=result,
+        participants=list(mapping.values()),
+        legend={label: name for name, label in mapping.items()},
+    )

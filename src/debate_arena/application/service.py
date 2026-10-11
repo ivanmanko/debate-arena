@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 
 from ..config import Settings
 from ..domain.analysts import build_analysts
-from ..domain.dialogue import RequestedMode, resolve_mode
+from ..domain.dialogue import RequestedMode, anonymize_dialogue, resolve_mode
 from ..domain.events import AnalysisEvent
 from ..domain.exceptions import (
     AnalysisNotFound,
@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 ProviderFactory = Callable[[str], ChatProvider]
 
 _WS_RE = re.compile(r"\s+")
+
+
+@dataclass(frozen=True)
+class StartedAnalysis:
+    id: int
+    legend: dict[str, str]  # placeholder → real participant name; only ever returned once
 
 
 @dataclass
@@ -76,7 +82,22 @@ class AnalysisService:
         model: str | None,
         mode: RequestedMode = "auto",
     ) -> int:
-        """Validate, persist and launch an analysis; returns its id. ``ValueError`` on bad input."""
+        """Like :meth:`start_analysis`, returning only the id."""
+        started = await self.start_analysis(
+            text=text, question=question, rounds=rounds, model=model, mode=mode
+        )
+        return started.id
+
+    async def start_analysis(
+        self,
+        *,
+        text: str,
+        question: str | None,
+        rounds: int | None,
+        model: str | None,
+        mode: RequestedMode = "auto",
+    ) -> StartedAnalysis:
+        """Validate, anonymise, persist and launch; ``ValueError`` on bad input (SPEC §3.1)."""
         s = self._settings
         text = text.strip()
         if not text:
@@ -88,6 +109,10 @@ class AnalysisService:
             raise ValueError(f"question is longer than {s.max_question_chars} characters")
         rounds = s.default_rounds if rounds is None else rounds
         input_mode, participants = resolve_mode(text, mode, line_share=s.dialogue_line_share)
+        legend: dict[str, str] = {}
+        if input_mode == "dialogue" and s.anonymize_participants:
+            anonymized = anonymize_dialogue(text, participants, s.language)
+            text, participants, legend = anonymized.text, anonymized.participants, anonymized.legend
         if not 1 <= rounds <= s.max_rounds:
             raise ValueError(f"rounds must be within 1..{s.max_rounds}")
         if model:
@@ -141,7 +166,7 @@ class AnalysisService:
         )
         run.task = asyncio.create_task(self._execute(analysis_id, run, flow))
         run.task.add_done_callback(_log_task_failure)
-        return analysis_id
+        return StartedAnalysis(id=analysis_id, legend=legend)
 
     async def wait(self, analysis_id: int) -> None:
         """Await the background run (tests, CLI). No-op when it is not in memory."""

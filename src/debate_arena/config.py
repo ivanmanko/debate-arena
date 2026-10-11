@@ -85,6 +85,8 @@ class Settings(BaseSettings):
     runs_kept_in_memory: int = 50
     # auto mode: share of speaker lines needed to treat the input as a dialogue (SPEC §4.0)
     dialogue_line_share: float = 0.6
+    # Real participant names never reach the model or the DB (SPEC §4.0b).
+    anonymize_participants: bool = True
     bot_token: str = ""
     # Shown in bot replies so a chat user can open the full verdict in the web UI.
     public_url: str = ""

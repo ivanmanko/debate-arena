@@ -86,10 +86,14 @@ def render_started(
     rounds: int,
     mock: bool,
     participants: list[str] | None = None,
+    legend: dict[str, str] | None = None,
 ) -> str:
     roster = "\n".join(f"{a.emoji} <b>{esc(a.name)}</b> — {esc(a.focus)}" for a in analysts)
     note = "\n\n<i>mock-режим: ключи провайдеров не заданы</i>" if mock else ""
     kind = f"💬 Диалог: {esc(', '.join(participants))}" if participants else f"📄 {esc(title)}"
+    if legend:
+        pairs = ", ".join(f"{esc(label)} — {esc(name)}" for label, name in legend.items())
+        kind += f"\n<i>Имена заменены (модель их не видит): {pairs}</i>"
     return (
         f"🧭 <b>Проверка здравого смысла</b>\n\n"
         f"{kind}\n\n"

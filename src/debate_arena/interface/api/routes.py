@@ -36,7 +36,7 @@ async def create_analysis(
     body: AnalysisRequest, service: AnalysisService = Depends(get_service)
 ) -> AnalysisCreated:
     try:
-        analysis_id = await service.start(
+        started = await service.start_analysis(
             text=body.text,
             question=body.question,
             rounds=body.rounds,
@@ -47,7 +47,7 @@ async def create_analysis(
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
     except ProviderNotConfigured as exc:
         raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
-    return AnalysisCreated(id=analysis_id)
+    return AnalysisCreated(id=started.id, legend=started.legend)
 
 
 @router.get("/api/analyses", response_model=list[AnalysisSummaryOut])

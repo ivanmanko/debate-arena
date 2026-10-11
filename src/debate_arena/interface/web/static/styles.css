@@ -68,6 +68,8 @@ code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); 
 .btn-sm { padding: 5px 10px; font-size: 13px; }
 .badge { font-size: 11px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; padding: 3px 8px; border-radius: 999px; border: 1px solid transparent; }
 .badge-warn { color: var(--warn); border-color: var(--warn); }
+.badge-info { color: var(--info); border-color: var(--info); }
+.legend { display: flex; align-items: center; gap: 10px; margin-top: 10px; }
 
 /* Layout */
 .layout { display: grid; grid-template-columns: 290px minmax(0, 1fr); min-height: calc(100vh - 57px); }

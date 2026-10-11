@@ -141,7 +141,8 @@
       if (!body.text.trim()) { err.textContent = "Вставьте текст для разбора."; err.classList.remove("hidden"); return; }
       $("#submit").disabled = true;
       try {
-        const { id } = await api.post("/api/analyses", body);
+        const { id, legend } = await api.post("/api/analyses", body);
+        if (legend && Object.keys(legend).length) { try { localStorage.setItem(`legend:${id}`, JSON.stringify(legend)); } catch (_) { /* ignore */ } }
         text.value = ""; $("#question").value = ""; $("#counter").textContent = "0";
         location.hash = `#/a/${id}`;
         await loadHistory();
@@ -163,7 +164,11 @@
     let detail;
     try { detail = await api.get(`/api/analyses/${id}`); }
     catch (err) { root.append(el("div", { class: "notice notice-error", text: `Разбор не найден: ${err.message}` })); return; }
-    state.current = { id, detail, seen: new Set(), chips: {}, startedAt: Date.parse(detail.created_at) || Date.now() };
+    let legend = null;
+    try { legend = JSON.parse(localStorage.getItem(`legend:${id}`) || "null"); } catch (_) { legend = null; }
+    let showReal = false;
+    try { showReal = localStorage.getItem("showRealNames") === "1"; } catch (_) { /* ignore */ }
+    state.current = { id, detail, seen: new Set(), chips: {}, startedAt: Date.parse(detail.created_at) || Date.now(), legend, showReal };
     renderHistory();
     root.append(buildAnalysis(detail));
     for (const t of detail.turns) addTurn(t);
@@ -171,6 +176,33 @@
     if (detail.error) showError(detail.error);
     if (detail.status === "running") subscribe(id);
     else finishChips();
+    applyLegend();
+  }
+
+  // Real names live only in this browser (localStorage); the server and the model see placeholders.
+  function applyLegend() {
+    const cur = state.current; if (!cur) return;
+    const box = $("[data-legend]"); if (!box) return;
+    const legend = cur.legend && Object.keys(cur.legend).length ? cur.legend : null;
+    box.classList.toggle("hidden", !legend);
+    if (!legend) return;
+    const btn = $("[data-legend-toggle]", box);
+    btn.textContent = cur.showReal ? "Скрыть настоящие имена" : "Показать настоящие имена";
+    btn.onclick = () => {
+      cur.showReal = !cur.showReal;
+      try { localStorage.setItem("showRealNames", cur.showReal ? "1" : "0"); } catch (_) { /* ignore */ }
+      openAnalysis(cur.id);
+    };
+    if (!cur.showReal) return;
+    const keys = Object.keys(legend).sort((a, b) => b.length - a.length);
+    const walker = document.createTreeWalker($("#analysis-root"), NodeFilter.SHOW_TEXT);
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    for (const node of nodes) {
+      let value = node.nodeValue;
+      for (const k of keys) value = value.split(k).join(legend[k]);
+      if (value !== node.nodeValue) node.nodeValue = value;
+    }
   }
 
   function buildAnalysis(d) {
@@ -288,8 +320,8 @@
     es.addEventListener("started", () => { /* chips already built */ });
     es.addEventListener("round", (e) => { const d = JSON.parse(e.data); currentRound = d.round_no; roundContainer(d.round_no, d.kind); });
     es.addEventListener("typing", (e) => { const d = JSON.parse(e.data); addTyping(d.analyst, d.emoji, currentRound); });
-    es.addEventListener("turn", (e) => addTurn(JSON.parse(e.data)));
-    es.addEventListener("verdict", (e) => { renderVerdict(JSON.parse(e.data), state.current.detail); setChip("Судья", "done"); });
+    es.addEventListener("turn", (e) => { addTurn(JSON.parse(e.data)); applyLegend(); });
+    es.addEventListener("verdict", (e) => { renderVerdict(JSON.parse(e.data), state.current.detail); setChip("Судья", "done"); applyLegend(); });
     // "error" is both the EventSource connection event (no data) and our SPEC §3.4 event (with data).
     es.addEventListener("error", (e) => { if (e.data) showError(JSON.parse(e.data).message); });
     es.addEventListener("done", async (e) => {

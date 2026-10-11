@@ -132,8 +132,9 @@ class TestDialogueMode:
         )
         await service.wait(analysis_id)
         record = await service.get(analysis_id)
-        assert record.mode == "dialogue" and record.participants == ["Иван", "Мария"]
-        assert [p.name for p in record.verdict.participants] == ["Иван", "Мария"]
+        assert record.mode == "dialogue"
+        assert record.participants == ["Собеседник А", "Собеседник Б"]  # anonymised by default
+        assert [p.name for p in record.verdict.participants] == record.participants
         assert record.verdict.closest_to_truth in record.participants
         events = await _collect(service, analysis_id)
         assert events[0].data["mode"] == "dialogue"
@@ -200,7 +201,7 @@ class TestDialogueMode:
         await service.wait(analysis_id)
         events = await _collect(_service(repo=repo), analysis_id)
         assert events[0].data["mode"] == "dialogue"
-        assert events[0].data["participants"] == ["Иван", "Мария"]
+        assert events[0].data["participants"] == ["Собеседник А", "Собеседник Б"]
 
 
 class TestEvents:
