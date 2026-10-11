@@ -37,12 +37,13 @@ def parse_model_ref(value: str) -> ModelRef:
 
 
 class AnalystSpec(BaseModel):
-    """One rational analyst: shared manifesto + a methodological lens (ADR-002)."""
+    """One rational analyst: shared manifesto + a methodological lens (ADR-002, ADR-007)."""
 
     name: str
     emoji: str
     focus: str
-    system_prompt: str
+    system_prompt: str  # the same for all three, so their calls share a cached prefix
+    lens: str  # opens every task of this analyst, after the cached material
 
 
 class ClaimAssessment(BaseModel):

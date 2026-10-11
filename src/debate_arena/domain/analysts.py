@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .prompts import analyst_meta, analyst_system_prompt, lens_names
+from .prompts import analyst_lens, analyst_meta, analyst_system_prompt, lens_names
 from .schemas import AnalystSpec
 
 DEFAULT_LANGUAGE = "русский"
@@ -17,7 +17,8 @@ def build_analysts(language: str = DEFAULT_LANGUAGE) -> tuple[AnalystSpec, ...]:
                 name=name,
                 emoji=emoji,
                 focus=focus,
-                system_prompt=analyst_system_prompt(name, language),
+                system_prompt=analyst_system_prompt(language),
+                lens=analyst_lens(name),
             )
         )
     return tuple(specs)

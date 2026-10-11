@@ -66,7 +66,7 @@ class MockProvider:
         elif CROSS_MARKER in request.user:
             text = _CROSS
         else:
-            key = next((k for k in _FIRST if k in request.system), "линза — ФАКТЫ")
+            key = next((k for k in _FIRST if k in request.user), "линза — ФАКТЫ")
             text = _FIRST[key]
         return Completion(text=text, usage=Usage(input_tokens=0, output_tokens=0))
 
@@ -74,8 +74,11 @@ class MockProvider:
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]:
         await asyncio.sleep(self._delay)
-        verdict = mock_verdict(participants_from_prompt(request.user))
+        verdict = mock_verdict(participants_from_prompt(request.joined_user()))
         return StructuredCompletion(value=verdict, usage=Usage(), raw=verdict.model_dump_json())  # type: ignore[arg-type]
+
+    async def prewarm(self, request: ChatRequest) -> Usage:
+        return Usage()
 
 
 def mock_verdict(participants: list[str] | None = None) -> Verdict:

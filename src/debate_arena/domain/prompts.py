@@ -26,6 +26,8 @@ _ANALYST_CORE = """Ты — один из трёх рациональных ан
 
 Ты критичен к словам коллег: ошибку называешь прямо, с объяснением, какой пункт Манифеста нарушен или какой факт упущен. Но ты принимаешь их доводы сразу, как только они рациональны, и говоришь об этом явно. Согласиться под весом доводов — норма; спорить ради спора или держаться за позицию из упрямства — нарушение Манифеста. Если коллега ближе к истине, чем ты, — сказать это и есть твоя работа.
 
+Каждый из троих смотрит на материал через свою методологическую линзу; твоя линза названа в начале задания, которое идёт после материала. Работай прежде всего через неё, не теряя из виду остальной Манифест.
+
 Ты не выдумываешь факты, цифры, источники и цитаты. Если не можешь проверить утверждение — так и пишешь: «не могу проверить», и объясняешь, что потребовалось бы для проверки.
 
 Формат: пиши на языке «{language}». Без markdown-заголовков и таблиц; короткие абзацы, при необходимости нумерованные пункты. Не представляйся, не пересказывай исходный материал целиком, не обращайся к его авторам лично."""
@@ -53,8 +55,13 @@ def analyst_meta(name: str) -> tuple[str, str]:
     return _ANALYST_META[name]
 
 
-def analyst_system_prompt(name: str, language: str) -> str:
-    return f"{MANIFEST}\n\n{_ANALYST_CORE.format(language=language)}\n\n{_LENSES[name]}"
+def analyst_system_prompt(language: str) -> str:
+    """One system prompt for all three analysts: their calls share a cached prefix (ADR-007)."""
+    return f"{MANIFEST}\n\n{_ANALYST_CORE.format(language=language)}"
+
+
+def analyst_lens(name: str) -> str:
+    return _LENSES[name]
 
 
 def _participants_line(participants: list[str] | None) -> str:
@@ -69,7 +76,8 @@ def participants_from_prompt(prompt: str) -> list[str]:
     return [name.strip() for name in match.group("names").split(",") if name.strip()]
 
 
-def _source_block(text: str, question: str | None, participants: list[str] | None) -> str:
+def source_context(text: str, question: str | None, participants: list[str] | None = None) -> str:
+    """The material block — first in every call, cached for the analysts (SPEC §4.8)."""
     if participants:
         block = (
             "Материал — ДИАЛОГ нескольких собеседников.\n"
@@ -92,9 +100,7 @@ def _dialogue_task(participants: list[str]) -> str:
     )
 
 
-def round_one_user(
-    text: str, question: str | None, language: str, participants: list[str] | None = None
-) -> str:
+def round_one_user(lens: str, language: str, participants: list[str] | None = None) -> str:
     steps = (
         "1. Ядро: что именно утверждается — нейтрально, без эмоций авторов, 1–3 тезиса.\n"
         "2. Факты, интерпретации, эмоции: что проверяемо, что мнение, что проекция.\n"
@@ -105,17 +111,16 @@ def round_one_user(
     )
     extra = f"\n\n{_dialogue_task(participants)}" if participants else ""
     return (
+        f"{lens}\n\n"
         "РАУНД 1 — Независимый разбор. Коллеги работают параллельно, их реплик ты не видишь: "
         "так сделано нарочно, чтобы исключить якорение на чужом ответе.\n\n"
-        f"{_source_block(text, question, participants)}\n\n"
-        f"Разбери материал по протоколу, через свою линзу:\n{steps}{extra}\n\n"
+        f"Разбери материал выше по протоколу, через свою линзу:\n{steps}{extra}\n\n"
         f"Объём 250–450 слов. Пиши на языке «{language}»."
     )
 
 
 def cross_round_user(
-    text: str,
-    question: str | None,
+    lens: str,
     transcript: str,
     round_no: int,
     language: str,
@@ -123,9 +128,9 @@ def cross_round_user(
 ) -> str:
     extra = f"\n\nПомни: {_dialogue_task(participants)}" if participants else ""
     return (
+        f"{lens}\n\n"
         f"РАУНД {round_no} — Перекрёстная проверка. Теперь ты видишь весь транскрипт. Цель "
         "раунда — сблизить картину команды с истиной, а не отстоять свою реплику.\n\n"
-        f"{_source_block(text, question, participants)}\n\n"
         f"Транскрипт обсуждения:\n{transcript}\n\n"
         "Твоя реплика — ровно три блока; каждый начинается с маркера на отдельной строке:\n"
         "Принимаю: — рациональные доводы коллег, которые ты принимаешь: кто, что именно и "
@@ -159,8 +164,6 @@ def verdict_json_schema() -> dict:
 
 
 def judge_user(
-    text: str,
-    question: str | None,
     transcript: str,
     participants: list[str],
     language: str,
@@ -176,9 +179,8 @@ def judge_user(
             "Это обычный текст, не диалог: participants — пустой список, closest_to_truth — null. "
         )
     prompt = (
-        f"{_source_block(text, question, participants)}\n\n"
         f"Полный транскрипт обсуждения аналитиков:\n{transcript}\n\n"
-        "Вынеси вердикт: сформулируй предмет нейтрально (core_question), скажи, что ближе "
+        "Вынеси вердикт по материалу выше: сформулируй предмет нейтрально (core_question), скажи, что ближе "
         "всего к истине (conclusion), дай развёрнутое обоснование (narrative, 400–800 слов, "
         "4–7 абзацев), оцени рациональность материала и свою уверенность, "
         "разложи установленное / вероятное / неопределённое, оцени ключевые утверждения "
@@ -223,26 +225,28 @@ def judge_chat_system_prompt(language: str) -> str:
 _CHAT_SPEAKERS = {"user": "Пользователь", "judge": "Судья"}
 
 
-def judge_chat_user(
+def judge_chat_context(
     text: str,
     question: str | None,
     transcript: str,
     participants: list[str],
     verdict_json: str,
-    history: Sequence[tuple[str, str]],
-    message: str,
-    language: str,
 ) -> str:
-    """Whole analysis context + previous chat as ``(role, text)`` pairs + the new message."""
-    prompt = (
-        f"{_source_block(text, question, participants or None)}\n\n"
+    """Material + transcript + verdict: unchanged between chat messages, so it is cached."""
+    return (
+        f"{source_context(text, question, participants or None)}\n\n"
         f"Полный транскрипт обсуждения аналитиков:\n{transcript}\n\n"
         f"Твой вердикт (JSON):\n{verdict_json}"
     )
+
+
+def judge_chat_user(history: Sequence[tuple[str, str]], message: str, language: str) -> str:
+    """Previous chat as ``(role, text)`` pairs + the new message, after the cached context."""
+    prompt = ""
     if history:
         rendered = "\n\n".join(f"{_CHAT_SPEAKERS[role]}: {body}" for role, body in history)
-        prompt += f"\n\nПредыдущий разговор с пользователем:\n{rendered}"
+        prompt = f"Предыдущий разговор с пользователем:\n{rendered}\n\n"
     return (
-        f"{prompt}\n\nНовое сообщение пользователя:\n«««\n{message.strip()}\n»»»\n\n"
+        f"{prompt}Новое сообщение пользователя:\n«««\n{message.strip()}\n»»»\n\n"
         f"Ответь на него как судья этого разбора. Пиши на языке «{language}»."
     )

@@ -15,12 +15,13 @@ from dataclasses import dataclass
 
 from ..domain.events import AnalysisEvent, EventSink
 from ..domain.exceptions import InvalidVerdict
-from ..domain.ports import ChatProvider, ChatRequest, Usage
+from ..domain.ports import CacheTTL, ChatProvider, ChatRequest, Usage
 from ..domain.prompts import (
     cross_round_user,
     judge_system_prompt,
     judge_user,
     round_one_user,
+    source_context,
     verdict_json_schema_text,
 )
 from ..domain.schemas import AnalystSpec, Verdict
@@ -52,6 +53,8 @@ class FlowConfig:
     analyst_effort: str
     judge_effort: str
     concurrency: int
+    # Analyst calls share system + material; None turns the cache marker off (SPEC §4.8).
+    cache_ttl: CacheTTL | None = None
 
 
 @dataclass(frozen=True)
@@ -79,8 +82,6 @@ class AnalysisFlow:
         analysis_id: int | None = None,
         participants: Sequence[str] = (),
     ) -> None:
-        self.text = text
-        self.question = question
         self.participants = list(participants)
         self.analysts = list(analysts)
         self.analyst_provider = analyst_provider
@@ -91,9 +92,10 @@ class AnalysisFlow:
         self.persist_verdict = persist_verdict
         self.analysis_id = analysis_id
         self.transcript = Transcript()
+        # Byte-identical in every call of this analysis — the cached prefix (SPEC §4.8).
+        self.context = source_context(text, question, self.participants or None)
         self._calls = 0
-        self._in_tokens = 0
-        self._out_tokens = 0
+        self._usage = Usage()
 
     async def run(self) -> FlowResult:
         await self.emit(
@@ -116,19 +118,18 @@ class AnalysisFlow:
         return FlowResult(
             verdict=verdict,
             calls=self._calls,
-            usage=Usage(input_tokens=self._in_tokens, output_tokens=self._out_tokens),
+            usage=self._usage,
         )
 
     # --- rounds -----------------------------------------------------------------
 
     async def _round_one(self) -> None:
         await self.emit(AnalysisEvent("round", {"round_no": 1, "kind": ROUND_ONE_KIND}))
-        user = round_one_user(
-            self.text, self.question, self.config.language, self.participants or None
-        )
+        await self._prewarm()
         semaphore = asyncio.Semaphore(self.config.concurrency)
 
         async def one(analyst: AnalystSpec) -> tuple[AnalystSpec, str]:
+            user = round_one_user(analyst.lens, self.config.language, self.participants or None)
             async with semaphore:
                 return analyst, await self._analyst_turn(analyst, user, 1)
 
@@ -147,8 +148,7 @@ class AnalysisFlow:
         await self.emit(AnalysisEvent("round", {"round_no": round_no, "kind": CROSS_ROUND_KIND}))
         for analyst in self.analysts:
             user = cross_round_user(
-                self.text,
-                self.question,
+                analyst.lens,
                 self.transcript.render(),
                 round_no,
                 self.config.language,
@@ -163,13 +163,7 @@ class AnalysisFlow:
                 "typing", {"analyst": analyst.name, "emoji": analyst.emoji, "role": "analyst"}
             )
         )
-        request = ChatRequest(
-            model=self.config.analyst_model,
-            system=analyst.system_prompt,
-            user=user,
-            max_tokens=self.config.turn_max_tokens,
-            effort=self.config.analyst_effort,
-        )
+        request = self._analyst_request(analyst.system_prompt, user)
         started = time.monotonic()
         completion = await self.analyst_provider.complete(request)
         self._account(
@@ -198,6 +192,42 @@ class AnalysisFlow:
             )
         )
 
+    def _analyst_request(self, system: str, user: str) -> ChatRequest:
+        return ChatRequest(
+            model=self.config.analyst_model,
+            system=system,
+            context=self.context,
+            user=user,
+            max_tokens=self.config.turn_max_tokens,
+            effort=self.config.analyst_effort,
+            cache_ttl=self.config.cache_ttl,
+        )
+
+    async def _prewarm(self) -> None:
+        """Write the shared prefix once, so the parallel round reads it (SPEC §4.8).
+
+        Parallel requests cannot read a cache entry another one is still writing; without
+        this each of the three would pay the write. A failure only costs the saving.
+        """
+        if self.config.cache_ttl is None or not self.analysts:
+            return
+        request = self._analyst_request(self.analysts[0].system_prompt, "")
+        started = time.monotonic()
+        try:
+            usage = await self.analyst_provider.prewarm(request)
+        except Exception as exc:  # noqa: BLE001 — an optimisation must not fail the analysis
+            logger.warning("cache prewarm failed for analysis %s: %s", self.analysis_id, exc)
+            return
+        self._account(
+            usage,
+            "prewarm",
+            1,
+            started,
+            self.analyst_provider.name,
+            self.config.analyst_model,
+            call=False,
+        )
+
     # --- judge ------------------------------------------------------------------
 
     async def _judge(self) -> Verdict:
@@ -212,9 +242,9 @@ class AnalysisFlow:
         request = ChatRequest(
             model=self.config.judge_model,
             system=judge_system_prompt(self.config.language),
+            # One call: nothing would read a cache entry, so the material goes unmarked.
+            context=self.context,
             user=judge_user(
-                self.text,
-                self.question,
                 self.transcript.render(),
                 self.participants,
                 self.config.language,
@@ -253,13 +283,27 @@ class AnalysisFlow:
     # --- stats ------------------------------------------------------------------
 
     def _account(
-        self, usage: Usage, role: str, round_no: int, started: float, provider: str, model: str
+        self,
+        usage: Usage,
+        role: str,
+        round_no: int,
+        started: float,
+        provider: str,
+        model: str,
+        *,
+        call: bool = True,
     ) -> None:
-        self._calls += 1
-        self._in_tokens += usage.input_tokens
-        self._out_tokens += usage.output_tokens
+        self._calls += call
+        total = self._usage
+        self._usage = Usage(
+            input_tokens=total.input_tokens + usage.input_tokens,
+            output_tokens=total.output_tokens + usage.output_tokens,
+            cache_read_tokens=total.cache_read_tokens + usage.cache_read_tokens,
+            cache_write_tokens=total.cache_write_tokens + usage.cache_write_tokens,
+        )
         logger.info(
-            "llm.call provider=%s model=%s role=%s analysis=%s round=%s ms=%d in=%d out=%d",
+            "llm.call provider=%s model=%s role=%s analysis=%s round=%s ms=%d in=%d out=%d "
+            "cache_read=%d cache_write=%d",
             provider,
             model,
             role,
@@ -268,4 +312,6 @@ class AnalysisFlow:
             int((time.monotonic() - started) * 1000),
             usage.input_tokens,
             usage.output_tokens,
+            usage.cache_read_tokens,
+            usage.cache_write_tokens,
         )

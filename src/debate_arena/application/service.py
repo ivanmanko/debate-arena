@@ -30,7 +30,7 @@ from ..domain.exceptions import (
     ProviderError,
     ProviderRefused,
 )
-from ..domain.ports import AnalysisRepository, ChatProvider
+from ..domain.ports import AnalysisRepository, ChatProvider, Usage
 from ..domain.records import AnalysisRecord, AnalysisSummary
 from ..domain.schemas import AnalystSpec, parse_model_ref
 from .flow import CROSS_ROUND_KIND, ROUND_ONE_KIND, AnalysisFlow, FlowConfig
@@ -164,6 +164,7 @@ class AnalysisService:
                 analyst_effort=s.analyst_effort,
                 judge_effort=s.judge_effort,
                 concurrency=s.llm_concurrency,
+                cache_ttl=s.cache_ttl_analysis,
             ),
             emit=lambda event: self._publish(run, event),
             persist_turn=lambda round_no, analyst, text: self._repo.add_turn(
@@ -252,15 +253,11 @@ class AnalysisService:
 
     async def _execute(self, analysis_id: int, run: _Run, flow: AnalysisFlow) -> None:
         started = time.monotonic()
-        status, error, calls, usage_in, usage_out = "finished", None, 0, 0, 0
+        status, error, calls, usage = "finished", None, 0, Usage()
         cancelled = False
         try:
             result = await flow.run()
-            calls, usage_in, usage_out = (
-                result.calls,
-                result.usage.input_tokens,
-                result.usage.output_tokens,
-            )
+            calls, usage = result.calls, result.usage
         except asyncio.CancelledError:
             # Process shutdown: record the interruption, then re-raise after bookkeeping.
             status, error, cancelled = "failed", "interrupted", True
@@ -276,11 +273,14 @@ class AnalysisService:
             await self._repo.finish(analysis_id, status, error, duration_ms)
         finally:
             logger.info(
-                "analysis.done id=%s status=%s ms=%d calls=%d",
+                "analysis.done id=%s status=%s ms=%d calls=%d in=%d cache_read=%d cache_write=%d",
                 analysis_id,
                 status,
                 duration_ms,
                 calls,
+                usage.input_tokens,
+                usage.cache_read_tokens,
+                usage.cache_write_tokens,
             )
             await self._publish(
                 run,
@@ -290,8 +290,9 @@ class AnalysisService:
                         "status": status,
                         "duration_ms": duration_ms,
                         "calls": calls,
-                        "input_tokens": usage_in,
-                        "output_tokens": usage_out,
+                        "input_tokens": usage.input_tokens,
+                        "output_tokens": usage.output_tokens,
+                        "cache_read_tokens": usage.cache_read_tokens,
                     },
                 ),
             )

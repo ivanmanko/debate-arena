@@ -66,12 +66,16 @@ class DeepSeekProvider:
             raise InvalidVerdict(str(exc)) from exc
         return StructuredCompletion(value=value, usage=_usage_of(payload), raw=raw)
 
+    async def prewarm(self, request: ChatRequest) -> Usage:
+        """DeepSeek caches repeated prefixes on its own (context first keeps them shared)."""
+        return Usage()
+
     async def _post(self, request: ChatRequest, *, json_mode: bool) -> dict:
         body: dict = {
             "model": request.model,
             "messages": [
                 {"role": "system", "content": request.system},
-                {"role": "user", "content": request.user},
+                {"role": "user", "content": request.joined_user()},
             ],
             "max_tokens": request.max_tokens,
             "temperature": self._temperature,
@@ -114,4 +118,5 @@ def _usage_of(payload: dict) -> Usage:
     return Usage(
         input_tokens=int(usage.get("prompt_tokens", 0) or 0),
         output_tokens=int(usage.get("completion_tokens", 0) or 0),
+        cache_read_tokens=int(usage.get("prompt_cache_hit_tokens", 0) or 0),
     )

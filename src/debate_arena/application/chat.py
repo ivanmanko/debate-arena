@@ -21,7 +21,7 @@ from ..domain.exceptions import (
     RationalCheckError,
 )
 from ..domain.ports import AnalysisRepository, ChatRequest
-from ..domain.prompts import judge_chat_system_prompt, judge_chat_user
+from ..domain.prompts import judge_chat_context, judge_chat_system_prompt, judge_chat_user
 from ..domain.records import AnalysisRecord, ChatMessageRecord
 from ..domain.schemas import Verdict, parse_model_ref
 from ..domain.transcript import Transcript
@@ -101,18 +101,17 @@ class JudgeChatService:
         request = ChatRequest(
             model=parse_model_ref(record.model_judge).model,
             system=judge_chat_system_prompt(s.language),
-            user=judge_chat_user(
+            context=judge_chat_context(
                 record.source_text,
                 record.question,
                 transcript.render(),
                 record.participants,
                 verdict.model_dump_json(),
-                [(m.role, m.text) for m in record.chat],
-                text,
-                s.language,
             ),
+            user=judge_chat_user([(m.role, m.text) for m in record.chat], text, s.language),
             max_tokens=s.judge_chat_max_tokens,
             effort=s.judge_chat_effort,
+            cache_ttl=s.cache_ttl_chat,
         )
         started = time.monotonic()
         try:
@@ -129,13 +128,16 @@ class JudgeChatService:
             logger.exception("judge chat failed for analysis %s", record.id)
             raise ProviderError(f"{type(exc).__name__}: {exc}") from exc
         logger.info(
-            "llm.call provider=%s model=%s role=chat analysis=%s round=0 ms=%d in=%d out=%d",
+            "llm.call provider=%s model=%s role=chat analysis=%s round=0 ms=%d in=%d out=%d "
+            "cache_read=%d cache_write=%d",
             provider.name,
             request.model,
             record.id,
             int((time.monotonic() - started) * 1000),
             completion.usage.input_tokens,
             completion.usage.output_tokens,
+            completion.usage.cache_read_tokens,
+            completion.usage.cache_write_tokens,
         )
         reply = completion.text.strip()
         if not reply:

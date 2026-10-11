@@ -63,6 +63,10 @@ class Settings(BaseSettings):
     # Reasoner replies can take minutes.
     deepseek_timeout_s: float = 600.0
     mock_llm: bool = False
+    # Prompt caching (SPEC §4.8): analyst calls follow each other within minutes; chat
+    # messages come after reading and thinking, often more than 5 minutes apart.
+    cache_ttl_analysis: Literal["5m", "1h"] = "5m"
+    cache_ttl_chat: Literal["5m", "1h"] = "1h"
 
     # --- Analysis shape (SPEC §7) ---
     default_rounds: int = 2

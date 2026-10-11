@@ -3,11 +3,15 @@
 Opus 5.5 specifics: thinking is always on and ``effort`` is the only depth control;
 ``messages.create`` takes no temperature (SDK 1.13). Structured output for the judge
 goes through ``messages.parse(output_format=Verdict)``.
+
+Prompt caching (SPEC §4.8, ADR-007): ``context`` is its own user block, marked with
+``cache_control`` when the request asks for a TTL — the breakpoint caches system + context.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 from typing import Any
 
 import anthropic
@@ -63,15 +67,42 @@ class AnthropicProvider:
             )
         return StructuredCompletion(value=value, usage=_usage_of(response), raw=_text_of(response))
 
+    async def prewarm(self, request: ChatRequest) -> Usage:
+        """Write system + context to the cache with a ``max_tokens=0`` call (no output billed).
+
+        The placeholder stands in for the task: everything up to the breakpoint matches the
+        real requests, including effort, so they read the entry this call writes.
+        """
+        if request.cache_ttl is None or not request.context:
+            return Usage()
+        warm = replace(request, user=_PREWARM_PLACEHOLDER, max_tokens=0)
+        response = await self._client.messages.create(**self._kwargs(warm))
+        return _usage_of(response)
+
     @staticmethod
     def _kwargs(request: ChatRequest) -> dict[str, Any]:
         return {
             "model": request.model,
             "max_tokens": request.max_tokens,
             "system": request.system,
-            "messages": [{"role": "user", "content": request.user}],
+            "messages": [{"role": "user", "content": _content(request)}],
             "output_config": {"effort": request.effort},
         }
+
+
+_PREWARM_PLACEHOLDER = "Задание будет следующим сообщением."
+
+
+def _content(request: ChatRequest) -> str | list[dict[str, Any]]:
+    if not request.context:
+        return request.user
+    context: dict[str, Any] = {"type": "text", "text": request.context}
+    if request.cache_ttl is not None:
+        marker: dict[str, str] = {"type": "ephemeral"}
+        if request.cache_ttl != "5m":  # 5 minutes is the API default
+            marker["ttl"] = request.cache_ttl
+        context["cache_control"] = marker
+    return [context, {"type": "text", "text": request.user}]
 
 
 def _raise_on_refusal(response: Any) -> None:
@@ -91,7 +122,12 @@ def _text_of(response: Any) -> str:
 
 def _usage_of(response: Any) -> Usage:
     usage = getattr(response, "usage", None)
+    read = int(getattr(usage, "cache_read_input_tokens", 0) or 0)
+    written = int(getattr(usage, "cache_creation_input_tokens", 0) or 0)
     return Usage(
-        input_tokens=int(getattr(usage, "input_tokens", 0) or 0),
+        # The API's input_tokens is only the uncached tail; ours is the whole prompt.
+        input_tokens=int(getattr(usage, "input_tokens", 0) or 0) + read + written,
         output_tokens=int(getattr(usage, "output_tokens", 0) or 0),
+        cache_read_tokens=read,
+        cache_write_tokens=written,
     )

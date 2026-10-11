@@ -13,6 +13,10 @@ from .schemas import Verdict
 ModelT = TypeVar("ModelT", bound=BaseModel)
 
 
+# How long a cached prompt prefix lives (SPEC §4.8, §7).
+CacheTTL = Literal["5m", "1h"]
+
+
 @dataclass(frozen=True)
 class ChatRequest:
     model: str
@@ -20,12 +24,22 @@ class ChatRequest:
     user: str
     max_tokens: int
     effort: str = "medium"  # Anthropic effort level; other providers ignore it
+    # Stable material sent before ``user`` — byte-identical across the calls that share it.
+    context: str = ""
+    # Cache ``system`` + ``context`` for this long; None — no cache marker (SPEC §4.8).
+    cache_ttl: CacheTTL | None = None
+
+    def joined_user(self) -> str:
+        """``context`` and ``user`` as one message, for providers without cache markers."""
+        return f"{self.context}\n\n{self.user}" if self.context else self.user
 
 
 @dataclass(frozen=True)
 class Usage:
-    input_tokens: int = 0
+    input_tokens: int = 0  # the whole prompt, cached part included
     output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_write_tokens: int = 0
 
 
 @dataclass(frozen=True)
@@ -51,6 +65,10 @@ class ChatProvider(Protocol):
     async def complete_structured(
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]: ...
+
+    async def prewarm(self, request: ChatRequest) -> Usage:
+        """Write ``system`` + ``context`` to the cache before parallel calls; may do nothing."""
+        ...
 
 
 class AnalysisRepository(Protocol):

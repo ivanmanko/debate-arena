@@ -575,6 +575,7 @@
     const parts = [`Время разбора: ${fmtMs(done.duration_ms)}`];
     if (done.calls) parts.push(`вызовов модели: ${done.calls}`);
     if (done.input_tokens || done.output_tokens) parts.push(`токены: ${done.input_tokens} → ${done.output_tokens}`);
+    if (done.cache_read_tokens) parts.push(`из кэша: ${done.cache_read_tokens}`);
     s.textContent = parts.join(" · ");
   }
 
