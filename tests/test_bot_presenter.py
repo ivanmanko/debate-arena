@@ -17,6 +17,7 @@ def test_text_verdict_card_has_no_winner_and_no_analyst_scores():
     for name in NAMES:
         assert name not in card
     assert "Аналитики сошлись" in card and "Осталось открытым" in card
+    assert "Развёрнутое обоснование" in card
     assert 'href="https://example.org/#/a/7"' in card
     assert "Что изменит вердикт" in card
 

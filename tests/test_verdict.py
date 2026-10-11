@@ -39,6 +39,12 @@ class TestSchema:
         with pytest.raises(ValidationError):
             Verdict.model_validate(make_verdict().model_dump() | {"conclusion": "   "})
 
+    def test_narrative_defaults_to_empty_for_old_rows(self):
+        payload = make_verdict().model_dump()
+        payload.pop("narrative", None)
+        assert Verdict.model_validate(payload).narrative == ""
+        assert "narrative" in Verdict.model_json_schema()["properties"]
+
     def test_no_analyst_scoring_fields(self):
         fields = set(Verdict.model_fields)
         assert "scores" not in fields and "most_rational" not in fields

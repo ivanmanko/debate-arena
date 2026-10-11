@@ -19,6 +19,7 @@ def make_verdict(
     return Verdict(
         core_question="Тестовый вопрос",
         conclusion="Тестовое заключение",
+        narrative="Абзац один обоснования.\n\nАбзац два обоснования.",
         rationality_score=61,
         confidence=70,
         established=["факт 1"],

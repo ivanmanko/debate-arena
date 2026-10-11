@@ -85,6 +85,15 @@ class TestJudgePrompts:
         assert "не выбираешь победителя" in system.lower()
         assert "БРИТВА ОККАМА" in system
 
+    def test_judge_is_asked_for_a_full_narrative_not_a_brief(self):
+        system = judge_system_prompt(LANG)
+        assert "narrative" in system
+        assert "400–800 слов" in system
+        assert "3–8 пунктов" in system
+        assert "кратко и конкретно" not in system
+        user = judge_user("t", None, "x", [], LANG)
+        assert "narrative" in user
+
     def test_judge_user_text_mode_has_transcript_and_no_participants(self):
         text = judge_user("исходный текст", "вопрос?", "[Раунд 1] A: ...", [], LANG)
         assert "исходный текст" in text
@@ -108,6 +117,6 @@ class TestJudgePrompts:
     def test_verdict_json_schema_matches_pydantic_model(self):
         schema = verdict_json_schema()
         props = schema["properties"]
-        for field in ("conclusion", "rationality_score", "claims", "participants", "consensus"):
+        for field in ("conclusion", "narrative", "rationality_score", "claims", "participants"):
             assert field in props
         assert "scores" not in props
