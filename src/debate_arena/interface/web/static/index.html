@@ -47,20 +47,24 @@
               <button id="file-btn" type="button" class="btn btn-ghost btn-sm" title="Загрузить текст из файла .txt или .md — или перетащите файл в поле">📄 Из файла .txt / .md</button>
               <input id="file" type="file" accept=".txt,.md,text/plain,text/markdown" hidden>
             </div>
-            <textarea id="text" rows="9" placeholder="Вставьте текст — пост, статью, тезис — или диалог в формате «Имя: реплика». Аналитики разберут его по Манифесту здравого смысла, а судья скажет, что ближе всего к истине (в диалоге — чья позиция). Можно перетащить сюда файл .txt или .md." required></textarea>
+            <textarea id="text" rows="9" placeholder="Вставьте текст — пост, статью, тезис — или диалог в любом формате. Аналитики разберут его по Манифесту здравого смысла, а судья скажет, что ближе всего к истине (в диалоге — чья позиция). Можно перетащить сюда файл .txt или .md." required></textarea>
             <span class="counter"><span id="counter">0</span> / <span id="counter-max">200000</span></span>
           </div>
           <label class="field">
             <span class="label">Что именно проверить <span class="muted">(необязательно)</span></span>
             <input id="question" type="text" maxlength="500" placeholder="Например: верен ли главный вывод автора?">
           </label>
+          <label class="field">
+            <span class="label">Скрыть имена <span class="muted">(через запятую, необязательно)</span></span>
+            <input id="hide-names" type="text" maxlength="900" placeholder="Например: Иван, Мария — в модель и историю уйдут «Собеседник А», «Собеседник Б»">
+          </label>
           <div class="compose-row">
             <div class="field">
               <span class="label">Материал <span id="mode-hint" class="muted"></span></span>
               <div id="mode" class="segmented" role="radiogroup">
-                <button type="button" data-mode="auto" class="active" title="Распознать диалог автоматически">Авто</button>
+                <button type="button" data-mode="auto" class="active" title="Текст это или диалог и кто собеседники — решат модели">Авто</button>
                 <button type="button" data-mode="text" title="Один автор">Текст</button>
-                <button type="button" data-mode="dialogue" title="Несколько собеседников, реплики «Имя: текст»">Диалог</button>
+                <button type="button" data-mode="dialogue" title="Несколько собеседников в любом формате — модели определят, кто они">Диалог</button>
               </div>
             </div>
             <div class="field">

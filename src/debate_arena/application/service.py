@@ -11,17 +11,11 @@ import asyncio
 import logging
 import re
 import time
-from collections.abc import AsyncIterator, Callable
+from collections.abc import AsyncIterator, Callable, Sequence
 from dataclasses import dataclass, field
 
 from ..config import Settings
 from ..domain.analysts import build_analysts
-from ..domain.dialogue import (
-    RequestedMode,
-    anonymize_dialogue,
-    anonymize_mentions,
-    resolve_mode,
-)
 from ..domain.events import AnalysisEvent
 from ..domain.exceptions import (
     AnalysisNotFound,
@@ -30,9 +24,11 @@ from ..domain.exceptions import (
     ProviderError,
     ProviderRefused,
 )
+from ..domain.names import hide_names as hide_names_in
+from ..domain.names import normalize_names
 from ..domain.ports import AnalysisRepository, ChatProvider, Usage
 from ..domain.records import AnalysisRecord, AnalysisSummary
-from ..domain.schemas import AnalystSpec, parse_model_ref
+from ..domain.schemas import AnalysisMode, AnalystSpec, parse_model_ref
 from .flow import CROSS_ROUND_KIND, ROUND_ONE_KIND, AnalysisFlow, FlowConfig
 
 logger = logging.getLogger(__name__)
@@ -85,11 +81,17 @@ class AnalysisService:
         question: str | None,
         rounds: int | None,
         model: str | None,
-        mode: RequestedMode = "auto",
+        mode: AnalysisMode = "auto",
+        hide_names: Sequence[str] = (),
     ) -> int:
         """Like :meth:`start_analysis`, returning only the id."""
         started = await self.start_analysis(
-            text=text, question=question, rounds=rounds, model=model, mode=mode
+            text=text,
+            question=question,
+            rounds=rounds,
+            model=model,
+            mode=mode,
+            hide_names=hide_names,
         )
         return started.id
 
@@ -100,9 +102,10 @@ class AnalysisService:
         question: str | None,
         rounds: int | None,
         model: str | None,
-        mode: RequestedMode = "auto",
+        mode: AnalysisMode = "auto",
+        hide_names: Sequence[str] = (),
     ) -> StartedAnalysis:
-        """Validate, anonymise, persist and launch; ``ValueError`` on bad input (SPEC §3.1)."""
+        """Validate, hide names, persist and launch; ``ValueError`` on bad input (SPEC §3.1)."""
         s = self._settings
         text = text.strip()
         if not text:
@@ -113,15 +116,13 @@ class AnalysisService:
         if question and len(question) > s.max_question_chars:
             raise ValueError(f"question is longer than {s.max_question_chars} characters")
         rounds = s.default_rounds if rounds is None else rounds
-        input_mode, participants = resolve_mode(
-            text, mode, line_share=s.dialogue_line_share, min_messages=s.dialogue_min_messages
-        )
-        legend: dict[str, str] = {}
-        if input_mode == "dialogue" and s.anonymize_participants:
-            anonymized = anonymize_dialogue(text, participants, s.language)
-            text, participants, legend = anonymized.text, anonymized.participants, anonymized.legend
-            if question:
-                question = anonymize_mentions(question, legend)
+        names = normalize_names(hide_names)
+        if len(names) > s.hidden_names_max:
+            raise ValueError(f"hide_names lists more than {s.hidden_names_max} names")
+        if any(len(name) > s.hidden_name_chars for name in names):
+            raise ValueError(f"names in hide_names are limited to {s.hidden_name_chars} characters")
+        hidden = hide_names_in(text, question, names, s.language)
+        text, question, legend = hidden.text, hidden.question, hidden.legend
         if not 1 <= rounds <= s.max_rounds:
             raise ValueError(f"rounds must be within 1..{s.max_rounds}")
         if model:
@@ -138,8 +139,7 @@ class AnalysisService:
         analysis_id = await self._repo.create(
             source_text=text,
             question=question,
-            mode=input_mode,
-            participants=participants,
+            mode=mode,
             rounds=rounds,
             model_analyst=model_analyst,
             model_judge=model_judge,
@@ -172,7 +172,8 @@ class AnalysisService:
             ),
             persist_verdict=lambda verdict: self._repo.save_verdict(analysis_id, verdict),
             analysis_id=analysis_id,
-            participants=participants,
+            mode=mode,
+            labels=list(legend),
         )
         run.task = asyncio.create_task(self._execute(analysis_id, run, flow))
         run.task.add_done_callback(_log_task_failure)

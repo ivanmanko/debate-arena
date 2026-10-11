@@ -15,7 +15,7 @@ from html import escape
 from pathlib import Path
 
 from ...application.flow import CROSS_ROUND_KIND, ROUND_ONE_KIND
-from ...domain.dialogue import participant_label
+from ...domain.names import participant_label
 from ...domain.records import AnalysisRecord, TurnRecord
 from ...domain.schemas import AnalystSpec, Verdict
 
@@ -244,8 +244,8 @@ def _foot(record: AnalysisRecord) -> str:
         "Снимок разбора: аналитики и судья — языковые модели, они работают только с текстом и "
         "своими знаниями, без поиска по источникам.",
     ]
-    if record.mode == "dialogue" and _are_labels(record.participants):
-        lines.append("Имена собеседников заменены метками.")
+    if _has_labels(record.source_text):
+        lines.append("Имена заменены метками.")
     return '<footer class="foot">' + "".join(f"<p>{_e(t)}</p>" for t in lines) + "</footer>"
 
 
@@ -291,12 +291,9 @@ def _list(items: Iterable[str]) -> str:
     return f"<ul>{lis}</ul>" if lis else '<p class="muted small">—</p>'
 
 
-def _are_labels(participants: Sequence[str]) -> bool:
-    """True when the names are §4.0b labels, not real names (ANONYMIZE_PARTICIPANTS=false)."""
-    return bool(participants) and any(
-        list(participants) == [participant_label(i, lang) for i in range(len(participants))]
-        for lang in ("русский", "english")
-    )
+def _has_labels(text: str) -> bool:
+    """True when names were hidden (§4.0b): the first label is in the material."""
+    return any(participant_label(0, lang) in text for lang in ("русский", "english"))
 
 
 def _claim_label(status: str) -> str:

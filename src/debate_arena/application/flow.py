@@ -24,7 +24,7 @@ from ..domain.prompts import (
     source_context,
     verdict_json_schema_text,
 )
-from ..domain.schemas import AnalystSpec, Verdict
+from ..domain.schemas import AnalysisMode, AnalystSpec, Verdict
 from ..domain.transcript import Transcript
 
 logger = logging.getLogger(__name__)
@@ -80,9 +80,11 @@ class AnalysisFlow:
         persist_turn: PersistTurn | None = None,
         persist_verdict: PersistVerdict | None = None,
         analysis_id: int | None = None,
-        participants: Sequence[str] = (),
+        mode: AnalysisMode = "auto",
+        labels: Sequence[str] = (),
     ) -> None:
-        self.participants = list(participants)
+        # The requested mode; the speakers are the judge's to name (ADR-008).
+        self.mode = mode
         self.analysts = list(analysts)
         self.analyst_provider = analyst_provider
         self.judge_provider = judge_provider
@@ -93,7 +95,7 @@ class AnalysisFlow:
         self.analysis_id = analysis_id
         self.transcript = Transcript()
         # Byte-identical in every call of this analysis — the cached prefix (SPEC §4.8).
-        self.context = source_context(text, question, self.participants or None)
+        self.context = source_context(text, question, mode, labels)
         self._calls = 0
         self._usage = Usage()
 
@@ -103,8 +105,7 @@ class AnalysisFlow:
                 "started",
                 {
                     "rounds": self.config.rounds,
-                    "mode": "dialogue" if self.participants else "text",
-                    "participants": self.participants,
+                    "mode": self.mode,
                     "analysts": [
                         {"name": a.name, "emoji": a.emoji, "focus": a.focus} for a in self.analysts
                     ],
@@ -129,7 +130,7 @@ class AnalysisFlow:
         semaphore = asyncio.Semaphore(self.config.concurrency)
 
         async def one(analyst: AnalystSpec) -> tuple[AnalystSpec, str]:
-            user = round_one_user(analyst.lens, self.config.language, self.participants or None)
+            user = round_one_user(analyst.lens, self.config.language, self.mode)
             async with semaphore:
                 return analyst, await self._analyst_turn(analyst, user, 1)
 
@@ -152,7 +153,7 @@ class AnalysisFlow:
                 self.transcript.render(),
                 round_no,
                 self.config.language,
-                self.participants or None,
+                self.mode,
             )
             text = await self._analyst_turn(analyst, user, round_no)
             await self._record_turn(round_no, analyst, text)
@@ -246,7 +247,7 @@ class AnalysisFlow:
             context=self.context,
             user=judge_user(
                 self.transcript.render(),
-                self.participants,
+                self.mode,
                 self.config.language,
                 json_schema=schema_text,
             ),
@@ -266,7 +267,7 @@ class AnalysisFlow:
                     self.judge_provider.name,
                     self.config.judge_model,
                 )
-                result.value.validate_for(self.participants)
+                result.value.validate_for(self.mode)
             except InvalidVerdict as exc:
                 last_error = exc
                 logger.warning("judge attempt %s invalid: %s", attempt, exc)

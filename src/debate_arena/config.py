@@ -105,12 +105,9 @@ class Settings(BaseSettings):
     title_chars: int = 80
     # Finished runs kept in memory for SSE replay before falling back to the DB.
     runs_kept_in_memory: int = 50
-    # auto mode: share of speaker lines needed to treat the input as a dialogue (SPEC §4.0)
-    dialogue_line_share: float = 0.6
-    # auto mode: this many messages from ≥ 2 speakers is a dialogue even with long bodies
-    dialogue_min_messages: int = 4
-    # Real participant names never reach the model or the DB (SPEC §4.0b).
-    anonymize_participants: bool = True
+    # Names the user asks to hide behind labels (SPEC §4.0b, §7).
+    hidden_names_max: int = 20
+    hidden_name_chars: int = 40
     bot_token: str = ""
     # Shown in bot replies so a chat user can open the full verdict in the web UI.
     public_url: str = ""

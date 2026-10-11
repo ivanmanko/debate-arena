@@ -3,12 +3,15 @@
 from __future__ import annotations
 
 import asyncio
+import re
 
 from ...domain.ports import ChatRequest, Completion, ModelT, StructuredCompletion, Usage
-from ...domain.prompts import JUDGE_CHAT_MARKER, participants_from_prompt
+from ...domain.prompts import JUDGE_CHAT_MARKER
 from ...domain.schemas import ClaimAssessment, Fallacy, ParticipantAssessment, Verdict
 
 CROSS_MARKER = "Принимаю:"
+DIALOGUE_MARKER = "Материал — ДИАЛОГ"
+_LABEL_RE = re.compile(r"\b(?:Собеседник [А-Я]|Participant [A-Z])\b")
 
 # Keys match the lens line ("Твоя линза — …"), not the manifesto, where "ФАКТЫ" also occurs.
 _FIRST = {
@@ -74,11 +77,22 @@ class MockProvider:
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]:
         await asyncio.sleep(self._delay)
-        verdict = mock_verdict(participants_from_prompt(request.joined_user()))
+        verdict = mock_verdict(guess_participants(request.context))
         return StructuredCompletion(value=verdict, usage=Usage(), raw=verdict.model_dump_json())  # type: ignore[arg-type]
 
     async def prewarm(self, request: ChatRequest) -> Usage:
         return Usage()
+
+
+def guess_participants(context: str) -> list[str]:
+    """The mock judge's speakers: hidden-name labels in order; two labels for a marked dialogue.
+
+    A real judge reads the material; the mock only needs a valid shape for the mode.
+    """
+    names = list(dict.fromkeys(_LABEL_RE.findall(context)))
+    if len(names) < 2 and DIALOGUE_MARKER in context:
+        names = ["Собеседник А", "Собеседник Б"]
+    return names if len(names) >= 2 else []
 
 
 def mock_verdict(participants: list[str] | None = None) -> Verdict:

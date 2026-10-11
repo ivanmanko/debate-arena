@@ -13,13 +13,13 @@ import time
 from dataclasses import dataclass
 
 from ..config import Settings
-from ..domain.dialogue import anonymize_mentions
 from ..domain.exceptions import (
     AnalysisNotFound,
     ChatUnavailable,
     ProviderError,
     RationalCheckError,
 )
+from ..domain.names import anonymize_mentions
 from ..domain.ports import AnalysisRepository, ChatRequest
 from ..domain.prompts import judge_chat_context, judge_chat_system_prompt, judge_chat_user
 from ..domain.records import AnalysisRecord, ChatMessageRecord
@@ -86,10 +86,8 @@ class JudgeChatService:
 
     @staticmethod
     def _anonymize(record: AnalysisRecord, text: str, legend: dict[str, str]) -> str:
-        """Dialogue only, and only labels that really are this analysis's participants."""
-        if record.mode != "dialogue":
-            return text
-        known = {label: name for label, name in legend.items() if label in record.participants}
+        """Only labels that really occur in this analysis's text (SPEC §4.0b)."""
+        known = {label: name for label, name in legend.items() if label in record.source_text}
         return anonymize_mentions(text, known)
 
     async def _reply(self, record: AnalysisRecord, verdict: Verdict, text: str) -> str:
@@ -105,7 +103,7 @@ class JudgeChatService:
                 record.source_text,
                 record.question,
                 transcript.render(),
-                record.participants,
+                record.mode,
                 verdict.model_dump_json(),
             ),
             user=judge_chat_user([(m.role, m.text) for m in record.chat], text, s.language),

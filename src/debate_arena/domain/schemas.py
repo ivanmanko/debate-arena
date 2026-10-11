@@ -15,6 +15,8 @@ from .exceptions import InvalidVerdict
 KNOWN_PROVIDERS = ("anthropic", "deepseek", "mock")
 
 ClaimStatus = Literal["supported", "plausible", "unsupported", "unfalsifiable", "false"]
+# Requested by the user; ``auto`` is resolved by the verdict (SPEC §4.0, ADR-008).
+AnalysisMode = Literal["auto", "text", "dialogue"]
 
 
 @dataclass(frozen=True)
@@ -117,23 +119,25 @@ class Verdict(BaseModel):
             raise ValueError("must not be blank")
         return value.strip()
 
-    def validate_for(self, participant_names: list[str]) -> None:
+    def validate_for(self, mode: AnalysisMode) -> None:
         """Invariants from SPEC §3.3 that the JSON schema alone cannot express.
 
-        ``participant_names`` is empty in text mode and lists every speaker in dialogue mode.
+        The mode fixes the shape of ``participants``; the names are the judge's own (ADR-008):
+        ``text`` — nobody; ``dialogue`` — at least two distinct speakers; ``auto`` — either.
         """
-        assessed = [p.name for p in self.participants]
-        if sorted(assessed) != sorted(participant_names):
-            raise InvalidVerdict(
-                f"participants must cover exactly {participant_names}, got {assessed}"
-            )
-        if participant_names:
-            if self.closest_to_truth not in participant_names:
-                raise InvalidVerdict(
-                    f"closest_to_truth {self.closest_to_truth!r} is not a participant"
-                )
-        elif self.closest_to_truth is not None:
-            raise InvalidVerdict("closest_to_truth must be null in text mode")
+        names = [p.name for p in self.participants]
+        if mode == "text" or (mode == "auto" and not names):
+            if names:
+                raise InvalidVerdict(f"participants must be empty for a text, got {names}")
+            if self.closest_to_truth is not None:
+                raise InvalidVerdict("closest_to_truth must be null for a text")
+            return
+        if len(names) < 2:
+            raise InvalidVerdict(f"a dialogue needs at least two participants, got {names}")
+        if len({name.strip().casefold() for name in names}) != len(names):
+            raise InvalidVerdict(f"participants must have distinct names, got {names}")
+        if self.closest_to_truth not in names:
+            raise InvalidVerdict(f"closest_to_truth {self.closest_to_truth!r} is not a participant")
 
     def participant(self, name: str) -> ParticipantAssessment | None:
         return next((p for p in self.participants if p.name == name), None)

@@ -8,10 +8,9 @@ The whole setup seeks the truth, never a winner (ADR-002 revision).
 from __future__ import annotations
 
 import json
-import re
 from collections.abc import Sequence
 
-from .schemas import Verdict
+from .schemas import AnalysisMode, Verdict
 
 MANIFEST = """МАНИФЕСТ ЗДРАВОГО СМЫСЛА — правила мышления, которые ты соблюдаешь без исключений:
 1. ЕДИНАЯ РЕАЛЬНОСТЬ. Обсуждаются только факты материального, проверяемого мира. Непроверяемые и неопровержимые гипотезы (заговоры, мистика, скрытые замыслы, невидимые сущности) аргументами не считаются и выводятся за скобки с пометкой «непроверяемо».
@@ -44,8 +43,6 @@ _ANALYST_META = {
     "Стилмен": ("⚖️", "сильнейшая версия, альтернативы, Оккам"),
 }
 
-_PARTICIPANTS_RE = re.compile(r"^Собеседники: (?P<names>.+?)\.$", re.MULTILINE)
-
 
 def lens_names() -> list[str]:
     return list(_LENSES)
@@ -65,43 +62,52 @@ def analyst_lens(name: str) -> str:
     return _LENSES[name]
 
 
-def _participants_line(participants: list[str] | None) -> str:
-    return f"Собеседники: {', '.join(participants)}." if participants else ""
+def source_context(
+    text: str, question: str | None, mode: AnalysisMode = "auto", labels: Sequence[str] = ()
+) -> str:
+    """The material block — first in every call, cached for the analysts (SPEC §4.8).
 
-
-def participants_from_prompt(prompt: str) -> list[str]:
-    """Inverse of ``_participants_line`` — lets the mock judge know the speakers."""
-    match = _PARTICIPANTS_RE.search(prompt)
-    if not match:
-        return []
-    return [name.strip() for name in match.group("names").split(",") if name.strip()]
-
-
-def source_context(text: str, question: str | None, participants: list[str] | None = None) -> str:
-    """The material block — first in every call, cached for the analysts (SPEC §4.8)."""
-    if participants:
-        block = (
-            "Материал — ДИАЛОГ нескольких собеседников.\n"
-            f"{_participants_line(participants)}\n«««\n{text.strip()}\n»»»"
+    No speaker list: the models identify the speakers themselves (ADR-008).
+    """
+    heading = {
+        "dialogue": "Материал — ДИАЛОГ нескольких собеседников:",
+        "text": "Текст для разбора:",
+        "auto": "Материал для разбора:",
+    }[mode]
+    block = f"{heading}\n«««\n{text.strip()}\n»»»"
+    if labels:
+        block += (
+            f"\n\nИмена людей в материале заменены метками: {', '.join(labels)}. "
+            "Называй этих людей только так."
         )
-    else:
-        block = f"Текст для разбора:\n«««\n{text.strip()}\n»»»"
     if question and question.strip():
         block += f"\n\nЧто именно просят проверить: {question.strip()}"
     return block
 
 
-def _dialogue_task(participants: list[str]) -> str:
-    return (
-        "Это диалог, поэтому разбирай позиции собеседников, а не выбирай победителя: "
-        "по каждому из них (" + ", ".join(participants) + ") сформулируй позицию в сильнейшей "
-        "форме, что у него верно, где главная ошибка и насколько его картина близка к истине. "
-        "Истина может лежать вне обеих позиций — тогда скажи это. Называй собеседников ровно "
-        "так, как они подписаны в диалоге, и никак иначе."
-    )
+_DIALOGUE_TASK = (
+    "разбирай позиции собеседников, а не выбирай победителя. Сначала определи собеседников "
+    "по самому материалу: собеседник — тот, у кого в нём своя позиция и свои реплики; "
+    "человек, которого только цитируют или упоминают, собеседником не считается. Называй "
+    "собеседников ровно так, как они подписаны или названы в материале. По каждому "
+    "сформулируй позицию в сильнейшей форме, что у него верно, где главная ошибка и "
+    "насколько его картина близка к истине. Истина может лежать вне всех позиций — тогда "
+    "скажи это."
+)
 
 
-def round_one_user(lens: str, language: str, participants: list[str] | None = None) -> str:
+def _mode_task(mode: AnalysisMode) -> str:
+    if mode == "dialogue":
+        return f"Это диалог, поэтому {_DIALOGUE_TASK}"
+    if mode == "auto":
+        return (
+            f"Если материал — диалог или спор нескольких собеседников, {_DIALOGUE_TASK} "
+            "Если это текст одного автора, разбирай его как текст."
+        )
+    return ""
+
+
+def round_one_user(lens: str, language: str, mode: AnalysisMode = "text") -> str:
     steps = (
         "1. Ядро: что именно утверждается — нейтрально, без эмоций авторов, 1–3 тезиса.\n"
         "2. Факты, интерпретации, эмоции: что проверяемо, что мнение, что проекция.\n"
@@ -110,7 +116,8 @@ def round_one_user(lens: str, language: str, participants: list[str] | None = No
         "5. Вывод: что ближе всего к истине, что непроверяемо; какое наблюдение опровергло бы "
         "твой вывод."
     )
-    extra = f"\n\n{_dialogue_task(participants)}" if participants else ""
+    task = _mode_task(mode)
+    extra = f"\n\n{task}" if task else ""
     return (
         f"{lens}\n\n"
         "РАУНД 1 — Независимый разбор. Коллеги работают параллельно, их реплик ты не видишь: "
@@ -125,9 +132,10 @@ def cross_round_user(
     transcript: str,
     round_no: int,
     language: str,
-    participants: list[str] | None = None,
+    mode: AnalysisMode = "text",
 ) -> str:
-    extra = f"\n\nПомни: {_dialogue_task(participants)}" if participants else ""
+    task = _mode_task(mode)
+    extra = f"\n\nПомни: {task}" if task else ""
     return (
         f"{lens}\n\n"
         f"РАУНД {round_no} — Перекрёстная проверка. Теперь ты видишь весь транскрипт. Цель "
@@ -164,21 +172,31 @@ def verdict_json_schema() -> dict:
     return Verdict.model_json_schema()
 
 
+_JUDGE_SPEAKERS = (
+    "Собеседников определи сам по материалу: собеседник — тот, у кого в нём своя позиция и "
+    "свои реплики; процитированный или упомянутый человек собеседником не считается. Оцени "
+    "КАЖДОГО ровно один раз в participants, имена — ровно как в материале, и назови "
+    "closest_to_truth — одного из них. "
+)
+_JUDGE_TEXT = "participants — пустой список, closest_to_truth — null. "
+
+
 def judge_user(
     transcript: str,
-    participants: list[str],
+    mode: AnalysisMode,
     language: str,
     json_schema: str | None = None,
 ) -> str:
-    if participants:
+    if mode == "dialogue":
+        participants_task = f"Это диалог: собеседников не меньше двух. {_JUDGE_SPEAKERS}"
+    elif mode == "auto":
         participants_task = (
-            "Оцени КАЖДОГО собеседника ровно один раз в participants (имена бери точно как "
-            "в диалоге: " + ", ".join(participants) + ") и назови closest_to_truth. "
+            "Сначала реши, диалог ли это. Если в материале не меньше двух собеседников со "
+            f"своими позициями — это диалог: {_JUDGE_SPEAKERS}Если это текст одного автора, "
+            f"даже с цитатами других людей: {_JUDGE_TEXT}"
         )
     else:
-        participants_task = (
-            "Это обычный текст, не диалог: participants — пустой список, closest_to_truth — null. "
-        )
+        participants_task = f"Это обычный текст, не диалог: {_JUDGE_TEXT}"
     prompt = (
         f"Полный транскрипт обсуждения аналитиков:\n{transcript}\n\n"
         "Вынеси вердикт по материалу выше: сформулируй предмет нейтрально (core_question), скажи, что ближе "
@@ -230,12 +248,12 @@ def judge_chat_context(
     text: str,
     question: str | None,
     transcript: str,
-    participants: list[str],
+    mode: AnalysisMode,
     verdict_json: str,
 ) -> str:
     """Material + transcript + verdict: unchanged between chat messages, so it is cached."""
     return (
-        f"{source_context(text, question, participants or None)}\n\n"
+        f"{source_context(text, question, mode)}\n\n"
         f"Полный транскрипт обсуждения аналитиков:\n{transcript}\n\n"
         f"Твой вердикт (JSON):\n{verdict_json}"
     )

@@ -6,9 +6,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ...config import ModelOption
-from ...domain.dialogue import InputMode, RequestedMode
 from ...domain.records import AnalysisSummary, ChatMessageRecord, TurnRecord
-from ...domain.schemas import Verdict
+from ...domain.schemas import AnalysisMode, Verdict
 
 
 class AnalysisRequest(BaseModel):
@@ -16,7 +15,9 @@ class AnalysisRequest(BaseModel):
     question: str | None = None  # length validated by the service against settings
     rounds: int | None = Field(default=None, ge=1)
     model: str | None = None
-    mode: RequestedMode = "auto"
+    mode: AnalysisMode = "auto"
+    # Names to replace with labels before the models and the DB (SPEC §4.0b); limits in §7.
+    hide_names: list[str] = Field(default_factory=list)
 
 
 class AnalysisCreated(BaseModel):
@@ -44,7 +45,7 @@ class AnalysisDetail(BaseModel):
     title: str
     source_text: str
     question: str | None
-    mode: InputMode
+    mode: AnalysisMode
     participants: list[str]
     rounds: int
     model_analyst: str

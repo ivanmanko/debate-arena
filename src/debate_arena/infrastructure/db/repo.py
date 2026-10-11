@@ -15,6 +15,7 @@ from ...domain.records import (
     ChatMessageRecord,
     ShareRecord,
     TurnRecord,
+    resolved_mode,
 )
 from ...domain.schemas import Verdict
 from .models import Analysis, JudgeMessage, ShareRow, Turn, VerdictRow
@@ -32,7 +33,6 @@ class SqlAlchemyAnalysisRepository:
         source_text: str,
         question: str | None,
         mode: str,
-        participants: list[str],
         rounds: int,
         model_analyst: str,
         model_judge: str,
@@ -44,7 +44,6 @@ class SqlAlchemyAnalysisRepository:
                 source_text=source_text,
                 question=question,
                 mode=mode,
-                participants=json.dumps(participants, ensure_ascii=False),
                 rounds=rounds,
                 model_analyst=model_analyst,
                 model_judge=model_judge,
@@ -71,6 +70,12 @@ class SqlAlchemyAnalysisRepository:
 
     async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None:
         async with self._sessions() as session:
+            row = await session.get(Analysis, analysis_id)
+            if row is not None:  # the judge names the speakers (ADR-008)
+                row.participants = json.dumps(
+                    [p.name for p in verdict.participants], ensure_ascii=False
+                )
+                row.mode = resolved_mode(row.mode, verdict)  # type: ignore[arg-type]
             session.add(
                 VerdictRow(
                     analysis_id=analysis_id,

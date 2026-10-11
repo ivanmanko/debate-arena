@@ -5,8 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from .dialogue import InputMode
-from .schemas import Verdict
+from .schemas import AnalysisMode, Verdict
 
 AnalysisStatus = Literal["running", "finished", "failed"]
 ChatRole = Literal["user", "judge"]
@@ -41,8 +40,8 @@ class AnalysisRecord(BaseModel):
     title: str
     source_text: str
     question: str | None
-    mode: InputMode
-    participants: list[str]
+    mode: AnalysisMode  # ``auto`` until the verdict resolves it
+    participants: list[str]  # named by the verdict (ADR-008)
     rounds: int
     model_analyst: str
     model_judge: str
@@ -57,12 +56,19 @@ class AnalysisRecord(BaseModel):
     share: ShareRecord | None = None
 
 
+def resolved_mode(requested: AnalysisMode, verdict: Verdict) -> AnalysisMode:
+    """``auto`` becomes ``dialogue`` if the judge named speakers, else ``text`` (ADR-008)."""
+    if requested != "auto":
+        return requested
+    return "dialogue" if verdict.participants else "text"
+
+
 class AnalysisSummary(BaseModel):
     id: int
     title: str
     status: AnalysisStatus
     created_at: datetime
-    mode: InputMode
+    mode: AnalysisMode
     rounds: int
     model_analyst: str
     rationality_score: int | None

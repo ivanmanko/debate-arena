@@ -68,6 +68,7 @@ async def create_analysis(
             rounds=body.rounds,
             model=body.model,
             mode=body.mode,
+            hide_names=body.hide_names,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc

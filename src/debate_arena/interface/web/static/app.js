@@ -110,20 +110,16 @@
   // ---------- Compose ----------
   function initCompose() {
     const text = $("#text");
-    const speakerRe = /^\s*(?:\[[^\]]{1,24}\]\s*)?(?:\*\*)?([^\s\[\]<>*:—–][^:—–\n]{0,39}?)(?:\*\*)?\s*(?::|—|–)\s+\S/;
-    const updateModeHint = () => {
-      const lines = text.value.split("\n").filter((l) => l.trim());
-      const names = new Set(lines.map((l) => (l.match(speakerRe) || [])[1]).filter(Boolean));
-      const share = lines.length ? lines.filter((l) => speakerRe.test(l)).length / lines.length : 0;
-      const looksDialogue = names.size >= 2 && share >= 0.6;
-      $("#mode-hint").textContent = state.mode === "auto" ? (looksDialogue ? `· похоже на диалог: ${[...names].slice(0, 4).join(", ")}` : "· похоже на текст") : "";
-    };
+    // No parser (ADR-008): in "Авто" the models decide whether it is a dialogue and who speaks.
+    const MODE_HINTS = { auto: "· текст или диалог — решат модели", text: "", dialogue: "· собеседников определят модели" };
+    const updateModeHint = () => { $("#mode-hint").textContent = MODE_HINTS[state.mode] || ""; };
+    updateModeHint();
     // No maxlength: the browser would silently cut a long paste. Over the limit the counter turns red and submit says so.
     const updateCounter = () => {
       $("#counter").textContent = text.value.length;
       $(".counter").classList.toggle("over", text.value.trim().length > maxTextChars());
     };
-    text.addEventListener("input", () => { updateCounter(); updateModeHint(); });
+    text.addEventListener("input", updateCounter);
     initFileInput(text);
     $("#mode").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-mode]"); if (!b) return;
@@ -142,7 +138,8 @@
     $("#compose").addEventListener("submit", async (e) => {
       e.preventDefault();
       const err = $("#compose-error"); err.classList.add("hidden");
-      const body = { text: text.value, question: $("#question").value || null, rounds: state.rounds, model: $("#model").value, mode: state.mode };
+      const hideNames = $("#hide-names").value.split(/[,;\n]/).map((n) => n.trim()).filter(Boolean);
+      const body = { text: text.value, question: $("#question").value || null, rounds: state.rounds, model: $("#model").value, mode: state.mode, hide_names: hideNames };
       if (!body.text.trim()) { err.textContent = "Вставьте текст для разбора."; err.classList.remove("hidden"); return; }
       const length = body.text.trim().length;
       if (length > maxTextChars()) { err.textContent = `В тексте ${length} символов, лимит — ${maxTextChars()}. Сократите текст.`; err.classList.remove("hidden"); return; }
@@ -150,7 +147,7 @@
       try {
         const { id, legend } = await api.post("/api/analyses", body);
         if (legend && Object.keys(legend).length) { try { localStorage.setItem(`legend:${id}`, JSON.stringify(legend)); } catch (_) { /* ignore */ } }
-        text.value = ""; $("#question").value = ""; updateCounter();
+        text.value = ""; $("#question").value = ""; $("#hide-names").value = ""; updateCounter();
         location.hash = `#/a/${id}`;
         await loadHistory();
       } catch (ex) { err.textContent = ex.message; err.classList.remove("hidden"); }
@@ -265,6 +262,21 @@
     }
   }
 
+  const MODE_LABELS = { auto: "Авто", text: "Текст", dialogue: "Диалог" };
+  // Hidden names live in the text as labels (SPEC §4.0b); the first label is always "А".
+  const LABEL_RE = /Собеседник [А-Я]|Participant [A-Z]/g;
+  const hiddenLabels = (d) => [...new Set(d.source_text.match(LABEL_RE) || [])];
+
+  // Speakers are named by the verdict (ADR-008): empty until it arrives, refreshed on "done".
+  function renderParticipants(root, d) {
+    const box = $("[data-participants]", root); if (!box) return;
+    box.innerHTML = "";
+    box.classList.toggle("hidden", !d.participants.length);
+    if (!d.participants.length) return;
+    box.append(el("span", { class: "muted small", text: "Собеседники:" }));
+    for (const name of d.participants) box.append(el("span", { class: "pchip", text: name }));
+  }
+
   function buildAnalysis(d) {
     const node = $("#tpl-analysis").content.firstElementChild.cloneNode(true);
     $("[data-id]", node).textContent = `#${d.id}`;
@@ -272,19 +284,14 @@
     $("[data-title]", node).textContent = d.title;
     setStatus(node, d.status);
     $("[data-meta]", node).append(
-      el("span", { text: d.mode === "dialogue" ? "Диалог" : "Текст" }),
+      el("span", { "data-mode-tag": "", text: MODE_LABELS[d.mode] || d.mode }),
       el("span", { text: `Модель: ${d.model_analyst}` }),
       el("span", { text: `Раундов: ${d.rounds}` }),
       el("span", { text: `Символов: ${d.source_text.length}` }),
       el("span", { "data-duration": "", text: d.duration_ms ? `Время: ${fmtMs(d.duration_ms)}` : "" }),
     );
     $("[data-text]", node).textContent = d.source_text;
-    if (d.mode === "dialogue") {
-      const box = $("[data-participants]", node);
-      box.append(el("span", { class: "muted small", text: "Диалог:" }));
-      for (const name of d.participants) box.append(el("span", { class: "pchip", text: name }));
-      box.classList.remove("hidden");
-    }
+    renderParticipants(node, d);
     if (d.question) { const q = $("[data-question]", node); q.textContent = `Вопрос: ${d.question}`; q.classList.remove("hidden"); }
     const progress = $("[data-progress]", node);
     for (const a of state.analysts) {
@@ -387,7 +394,7 @@
     es.addEventListener("done", async (e) => {
       const d = JSON.parse(e.data);
       closeStream();
-      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); renderChat(detail); renderShare(detail); applyLegend(); } catch (_) { /* ignore */ }
+      try { const detail = await api.get(`/api/analyses/${id}`); state.current.detail = detail; setStatus($("#analysis-root"), detail.status); const modeTag = $("#analysis-root [data-mode-tag]"); if (modeTag) modeTag.textContent = MODE_LABELS[detail.mode] || detail.mode; renderParticipants($("#analysis-root"), detail); const dur = $("[data-duration]"); if (dur) dur.textContent = `Время: ${fmtMs(detail.duration_ms)}`; if (detail.verdict && !$(".verdict")) renderVerdict(detail.verdict, detail); renderStats(d); renderChat(detail); renderShare(detail); applyLegend(); } catch (_) { /* ignore */ }
       finishChips();
       await loadHistory();
     });
@@ -476,7 +483,7 @@
     if (d.status !== "finished" || !d.verdict) return;
     const err = el("p", { class: "error hidden" });
     const fail = (ex) => { err.textContent = ex.message; err.classList.remove("hidden"); };
-    const what = "Публикуются исходный материал, реплики аналитиков и вердикт — в том виде, в каком они хранятся на сервере. Обсуждение с судьёй не публикуется" + (d.mode === "dialogue" ? ", настоящие имена из этого браузера — тоже." : ".");
+    const what = "Публикуются исходный материал, реплики аналитиков и вердикт — в том виде, в каком они хранятся на сервере. Обсуждение с судьёй не публикуется" + (hiddenLabels(d).length ? ", настоящие имена из этого браузера — тоже." : ".");
     const local = state.config?.share_backend === "local" ? " Снимок лежит на этом сервере: ссылка откроется у других, только если сервер им доступен." : "";
     if (!d.share) {
       const btn = el("button", { class: "btn btn-primary btn-sm", type: "button", text: "🌐 Опубликовать" });
@@ -561,11 +568,11 @@
     });
     refresh();
     // Without the legend the server cannot replace real names in the message (SPEC §4.6).
-    const noLegend = d.mode === "dialogue" && !(state.current?.legend && Object.keys(state.current.legend).length);
+    const noLegend = hiddenLabels(d).length > 0 && !(state.current?.legend && Object.keys(state.current.legend).length);
     slot.append(el("div", { class: "card chat" }, [
       el("h3", { text: "💬 Обсудить с судьёй" }),
       el("p", { class: "muted small", text: "Переспросите, попросите объяснить или оспорьте вывод. Судья меняет оценку только под весом доводов и новых фактов, а не настойчивости; вердикт выше при этом не переписывается." }),
-      noLegend ? el("p", { class: "notice small", text: `Настоящие имена этого диалога в этом браузере не сохранены — называйте собеседников метками (${d.participants.join(", ")}), иначе имена уйдут в модель.` }) : null,
+      noLegend ? el("p", { class: "notice small", text: `Скрытые имена этого разбора в этом браузере не сохранены — называйте людей метками (${hiddenLabels(d).join(", ")}), иначе имена уйдут в модель.` }) : null,
       log, form,
     ]));
   }
@@ -582,7 +589,7 @@
   function toMarkdown(d) {
     const v = d.verdict; const lines = [`# Разбор #${d.id}: ${d.title}`, "", "## Исходный текст", "", d.source_text, ""];
     if (d.question) lines.push(`**Вопрос:** ${d.question}`, "");
-    if (d.mode === "dialogue") lines.push(`**Собеседники:** ${d.participants.join(", ")}`, "");
+    if (d.participants.length) lines.push(`**Собеседники:** ${d.participants.join(", ")}`, "");
     let round = 0;
     for (const t of d.turns) { if (t.round_no !== round) { round = t.round_no; lines.push(`## Раунд ${round}`, ""); } lines.push(`### ${t.emoji} ${t.analyst}`, "", t.text, ""); }
     if (v) {

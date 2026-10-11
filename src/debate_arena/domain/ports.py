@@ -88,7 +88,6 @@ class AnalysisRepository(Protocol):
         source_text: str,
         question: str | None,
         mode: str,
-        participants: list[str],
         rounds: int,
         model_analyst: str,
         model_judge: str,
@@ -99,7 +98,9 @@ class AnalysisRepository(Protocol):
         self, analysis_id: int, round_no: int, analyst: str, emoji: str, text: str
     ) -> None: ...
 
-    async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None: ...
+    async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None:
+        """Store the verdict; it also names the participants and resolves ``auto`` mode."""
+        ...
 
     async def add_chat_exchange(
         self, analysis_id: int, question: str, reply: str
