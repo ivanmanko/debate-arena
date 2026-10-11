@@ -9,7 +9,8 @@ from .models import Base
 
 class Database:
     def __init__(self, url: str) -> None:
-        self.engine = create_async_engine(url, future=True)
+        # pool_pre_ping: serverless Postgres (Neon) suspends idle compute and drops connections.
+        self.engine = create_async_engine(url, future=True, pool_pre_ping=True)
         self.sessions = async_sessionmaker(self.engine, expire_on_commit=False, class_=AsyncSession)
 
     async def init(self) -> None:
