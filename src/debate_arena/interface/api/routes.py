@@ -6,15 +6,25 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response,
 from fastapi.responses import StreamingResponse
 
 from ... import __version__
+from ...application.chat import JudgeChatService
 from ...application.service import AnalysisService
 from ...config import Settings
-from ...domain.exceptions import AnalysisNotFound, AnalysisRunning, ProviderNotConfigured
+from ...domain.exceptions import (
+    AnalysisNotFound,
+    AnalysisRunning,
+    ChatUnavailable,
+    ProviderError,
+    ProviderNotConfigured,
+    ProviderRefused,
+)
 from .schemas import (
     AnalysisCreated,
     AnalysisDetail,
     AnalysisRequest,
     AnalysisSummaryOut,
     AnalystOut,
+    ChatExchangeOut,
+    ChatRequestIn,
     ConfigOut,
     HealthOut,
 )
@@ -25,6 +35,10 @@ router = APIRouter()
 
 def get_service(request: Request) -> AnalysisService:
     return request.app.state.service
+
+
+def get_chat(request: Request) -> JudgeChatService:
+    return request.app.state.chat
 
 
 def get_settings_dep(request: Request) -> Settings:
@@ -67,9 +81,10 @@ async def get_analysis(
     except AnalysisNotFound as exc:
         raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
     return AnalysisDetail(
-        **record.model_dump(exclude={"turns", "verdict"}),
+        **record.model_dump(exclude={"turns", "verdict", "chat"}),
         turns=record.turns,
         verdict=record.verdict,
+        chat=record.chat,
         analysts=[AnalystOut(name=a.name, emoji=a.emoji, focus=a.focus) for a in service.analysts],
     )
 
@@ -90,6 +105,29 @@ async def analysis_events(
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.post("/api/analyses/{analysis_id}/chat", response_model=ChatExchangeOut)
+async def ask_judge(
+    analysis_id: int, body: ChatRequestIn, chat: JudgeChatService = Depends(get_chat)
+) -> ChatExchangeOut:
+    try:
+        exchange = await chat.ask(analysis_id, body.text, body.legend)
+    except AnalysisNotFound as exc:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, detail="analysis not found") from exc
+    except ChatUnavailable as exc:
+        raise HTTPException(status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from exc
+    except ProviderRefused as exc:
+        raise HTTPException(
+            status.HTTP_502_BAD_GATEWAY, detail="Модель отказалась отвечать на это сообщение"
+        ) from exc
+    except ProviderError as exc:
+        raise HTTPException(status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+    except ProviderNotConfigured as exc:
+        raise HTTPException(status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc)) from exc
+    return ChatExchangeOut(question=exchange.question, reply=exchange.reply)
 
 
 @router.delete("/api/analyses/{analysis_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -119,6 +157,8 @@ async def get_config(
         max_question_chars=settings.max_question_chars,
         mock=settings.use_mock,
         analysts=[AnalystOut(name=a.name, emoji=a.emoji, focus=a.focus) for a in service.analysts],
+        chat_max_chars=settings.judge_chat_max_chars,
+        chat_max_messages=settings.judge_chat_max_messages,
     )
 
 

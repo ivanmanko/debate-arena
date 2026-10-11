@@ -15,6 +15,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from . import __version__
+from .application.chat import JudgeChatService
 from .application.service import AnalysisService, ProviderFactory
 from .config import Settings, get_settings
 from .domain.ports import AnalysisRepository
@@ -51,6 +52,9 @@ def create_app(
         await service.recover_interrupted()
         app.state.settings = settings
         app.state.service = service
+        app.state.chat = JudgeChatService(
+            repo=active_repo, provider_factory=factory, settings=settings
+        )
         if settings.use_mock:
             logger.warning("No provider key for the selected models (or MOCK_LLM=1) — mock engine")
         logger.info(

@@ -9,9 +9,15 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import selectinload
 
-from ...domain.records import AnalysisRecord, AnalysisSummary, TurnRecord
+from ...domain.records import (
+    AnalysisRecord,
+    AnalysisSummary,
+    ChatMessageRecord,
+    ChatRole,
+    TurnRecord,
+)
 from ...domain.schemas import Verdict
-from .models import Analysis, Turn, VerdictRow
+from .models import Analysis, JudgeMessage, Turn, VerdictRow
 
 
 class SqlAlchemyAnalysisRepository:
@@ -74,6 +80,15 @@ class SqlAlchemyAnalysisRepository:
             )
             await session.commit()
 
+    async def add_chat_message(
+        self, analysis_id: int, role: ChatRole, text: str
+    ) -> ChatMessageRecord:
+        async with self._sessions() as session:
+            row = JudgeMessage(analysis_id=analysis_id, role=role, text=text)
+            session.add(row)
+            await session.commit()
+            return _to_chat_message(row)
+
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int
     ) -> None:
@@ -95,7 +110,11 @@ class SqlAlchemyAnalysisRepository:
             row = await session.scalar(
                 select(Analysis)
                 .where(Analysis.id == analysis_id)
-                .options(selectinload(Analysis.turns), selectinload(Analysis.verdict))
+                .options(
+                    selectinload(Analysis.turns),
+                    selectinload(Analysis.verdict),
+                    selectinload(Analysis.chat),
+                )
             )
             return _to_record(row) if row else None
 
@@ -127,7 +146,7 @@ class SqlAlchemyAnalysisRepository:
             row = await session.get(Analysis, analysis_id)
             if row is None:
                 return False
-            await session.delete(row)  # cascades to turns and verdict via ORM
+            await session.delete(row)  # cascades to turns, verdict and chat via ORM
             await session.commit()
             return True
 
@@ -176,4 +195,9 @@ def _to_record(row: Analysis) -> AnalysisRecord:
             for t in row.turns
         ],
         verdict=Verdict.model_validate_json(row.verdict.payload) if row.verdict else None,
+        chat=[_to_chat_message(m) for m in row.chat],
     )
+
+
+def _to_chat_message(row: JudgeMessage) -> ChatMessageRecord:
+    return ChatMessageRecord(role=row.role, text=row.text, created_at=_utc(row.created_at))

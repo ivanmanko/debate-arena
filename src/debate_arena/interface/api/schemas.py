@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from ...config import ModelOption
 from ...domain.dialogue import InputMode, RequestedMode
-from ...domain.records import AnalysisSummary, TurnRecord
+from ...domain.records import AnalysisSummary, ChatMessageRecord, TurnRecord
 from ...domain.schemas import Verdict
 
 
@@ -49,9 +49,22 @@ class AnalysisDetail(BaseModel):
     analysts: list[AnalystOut]
     turns: list[TurnRecord]
     verdict: Verdict | None
+    chat: list[ChatMessageRecord]
 
 
 AnalysisSummaryOut = AnalysisSummary
+
+
+class ChatRequestIn(BaseModel):
+    text: str = Field(min_length=1)  # length validated by the chat service against settings
+    legend: dict[str, str] = Field(
+        default_factory=dict, description="placeholder → real name, to anonymise; never stored"
+    )
+
+
+class ChatExchangeOut(BaseModel):
+    question: ChatMessageRecord
+    reply: ChatMessageRecord
 
 
 class ConfigOut(BaseModel):
@@ -63,6 +76,8 @@ class ConfigOut(BaseModel):
     max_question_chars: int
     mock: bool
     analysts: list[AnalystOut]
+    chat_max_chars: int
+    chat_max_messages: int
 
 
 class HealthOut(BaseModel):

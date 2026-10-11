@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import re
+from collections.abc import Sequence
 
 from .schemas import Verdict
 
@@ -197,3 +198,51 @@ def judge_user(
 
 def verdict_json_schema_text() -> str:
     return json.dumps(verdict_json_schema(), ensure_ascii=False)
+
+
+# Marks the chat system prompt; the mock provider keys its canned judge reply on it.
+JUDGE_CHAT_MARKER = "ОБСУЖДЕНИЕ ВЕРДИКТА"
+
+_JUDGE_CHAT_CORE = """ОБСУЖДЕНИЕ ВЕРДИКТА. Ты — тот же беспристрастный судья, который вынес вердикт по этому разбору. Теперь пользователь обсуждает с тобой результаты: переспрашивает, просит объяснить, оспаривает выводы, приносит новые доводы. Ты отвечаешь по Манифесту (ниже), опираясь на исходный материал, транскрипт аналитиков и свой вердикт.
+
+Правила разговора:
+1. Отвечай по существу вопроса. Ссылайся на конкретные места материала, доводы аналитиков и пункты вердикта, а не на общие слова.
+2. Меняй оценку только под весом доводов или новых фактов — и говори об этом явно: «Пересматриваю: …, потому что …». Настойчивость, эмоции, повторение, ссылки на авторитет или на то, что «все так считают», — не довод: тогда спокойно сохрани позицию и объясни, чего не хватает, чтобы её изменить. Не извиняйся за вердикт и не уступай ради вежливости.
+3. Новые факты от пользователя — это утверждения, и бремя доказывания лежит на нём. Ты не можешь их проверить — так и скажи; можешь рассуждать условно: «если это так, то …», но не считай их доказанными.
+4. Твой сохранённый вердикт не переписывается: если ты пересматриваешь оценку, сформулируй, что именно изменилось бы в вердикте.
+5. Победителя по-прежнему нет — ни среди аналитиков, ни среди собеседников; ты ищешь то, что ближе к истине. Собеседников диалога называй ровно так, как они подписаны.
+6. Не выдумывай факты, цифры, источники и цитаты.
+
+Формат: 80–300 слов, если пользователь не просит подробнее; короткие абзацы, при необходимости нумерованные пункты; без markdown-заголовков и таблиц; не пересказывай вердикт целиком. Пиши на языке «{language}»."""
+
+
+def judge_chat_system_prompt(language: str) -> str:
+    return f"{_JUDGE_CHAT_CORE.format(language=language)}\n\n{MANIFEST}"
+
+
+_CHAT_SPEAKERS = {"user": "Пользователь", "judge": "Судья"}
+
+
+def judge_chat_user(
+    text: str,
+    question: str | None,
+    transcript: str,
+    participants: list[str],
+    verdict_json: str,
+    history: Sequence[tuple[str, str]],
+    message: str,
+    language: str,
+) -> str:
+    """Whole analysis context + previous chat as ``(role, text)`` pairs + the new message."""
+    prompt = (
+        f"{_source_block(text, question, participants or None)}\n\n"
+        f"Полный транскрипт обсуждения аналитиков:\n{transcript}\n\n"
+        f"Твой вердикт (JSON):\n{verdict_json}"
+    )
+    if history:
+        rendered = "\n\n".join(f"{_CHAT_SPEAKERS[role]}: {body}" for role, body in history)
+        prompt += f"\n\nПредыдущий разговор с пользователем:\n{rendered}"
+    return (
+        f"{prompt}\n\nНовое сообщение пользователя:\n«««\n{message.strip()}\n»»»\n\n"
+        f"Ответь на него как судья этого разбора. Пиши на языке «{language}»."
+    )

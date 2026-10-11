@@ -7,7 +7,7 @@ from typing import Protocol, TypeVar
 
 from pydantic import BaseModel
 
-from .records import AnalysisRecord, AnalysisSummary
+from .records import AnalysisRecord, AnalysisSummary, ChatMessageRecord, ChatRole
 from .schemas import Verdict
 
 ModelT = TypeVar("ModelT", bound=BaseModel)
@@ -74,6 +74,10 @@ class AnalysisRepository(Protocol):
     ) -> None: ...
 
     async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None: ...
+
+    async def add_chat_message(
+        self, analysis_id: int, role: ChatRole, text: str
+    ) -> ChatMessageRecord: ...
 
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int

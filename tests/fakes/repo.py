@@ -4,7 +4,13 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 
-from debate_arena.domain.records import AnalysisRecord, AnalysisSummary, TurnRecord
+from debate_arena.domain.records import (
+    AnalysisRecord,
+    AnalysisSummary,
+    ChatMessageRecord,
+    ChatRole,
+    TurnRecord,
+)
 from debate_arena.domain.schemas import Verdict
 
 
@@ -62,6 +68,13 @@ class InMemoryRepository:
 
     async def save_verdict(self, analysis_id: int, verdict: Verdict) -> None:
         self.rows[analysis_id].verdict = verdict
+
+    async def add_chat_message(
+        self, analysis_id: int, role: ChatRole, text: str
+    ) -> ChatMessageRecord:
+        message = ChatMessageRecord(role=role, text=text, created_at=datetime.now(UTC))
+        self.rows[analysis_id].chat.append(message)
+        return message
 
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int

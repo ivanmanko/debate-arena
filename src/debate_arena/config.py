@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     llm_concurrency: int = 3
     language: str = "русский"
 
+    # --- Judge chat: discussing the verdict (SPEC §4.6, §7) ---
+    judge_chat_effort: Effort = "medium"
+    judge_chat_max_tokens: int = 6_000
+    judge_chat_max_chars: int = 2_000
+    judge_chat_max_messages: int = 20
+
     # --- Storage / web / bot ---
     database_url: str = "sqlite+aiosqlite:///./debate_arena.db"
     web_host: str = "127.0.0.1"
@@ -112,6 +118,11 @@ class Settings(BaseSettings):
                 f"JUDGE_MAX_TOKENS={self.judge_max_tokens} is below {MIN_JUDGE_MAX_TOKENS}: the "
                 "judge's JSON verdict would be truncated. Remove the legacy line from .env or "
                 "raise it."
+            )
+        if self.judge_chat_max_tokens < MIN_TURN_MAX_TOKENS:
+            raise ValueError(
+                f"JUDGE_CHAT_MAX_TOKENS={self.judge_chat_max_tokens} is below "
+                f"{MIN_TURN_MAX_TOKENS}: the judge's chat replies would be cut mid-sentence."
             )
         return self
 

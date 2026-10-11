@@ -234,6 +234,14 @@ def _mention_pattern(name: str) -> re.Pattern[str]:
     return re.compile(r"\b(?:" + "|".join(alternatives) + r")\b", re.IGNORECASE)
 
 
+def anonymize_mentions(text: str, legend: dict[str, str]) -> str:
+    """Replace mentions of real names with their labels; ``legend`` is label → real name."""
+    for label, name in sorted(legend.items(), key=lambda item: len(item[1]), reverse=True):
+        if name.strip():
+            text = _mention_pattern(name).sub(label, text)
+    return text
+
+
 def anonymize_dialogue(text: str, participants: list[str], language: str) -> AnonymizedDialogue:
     """Rewrite speaker lines as ``<label>: text`` and replace in-text mentions of names."""
     mapping = {name: participant_label(i, language) for i, name in enumerate(participants)}

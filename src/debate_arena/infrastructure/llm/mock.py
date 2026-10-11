@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from ...domain.ports import ChatRequest, Completion, ModelT, StructuredCompletion, Usage
-from ...domain.prompts import participants_from_prompt
+from ...domain.prompts import JUDGE_CHAT_MARKER, participants_from_prompt
 from ...domain.schemas import ClaimAssessment, Fallacy, ParticipantAssessment, Verdict
 
 CROSS_MARKER = "Принимаю:"
@@ -44,6 +44,15 @@ _CROSS = (
 )
 
 
+_CHAT_REPLY = (
+    "Вердикт держится на том, что в материале нет данных в пользу главного тезиса: бремя "
+    "доказывания лежит на утверждающем, а его не выполнили. Если вы приведёте "
+    "воспроизводимые измерения, оценку стоит пересмотреть — проверить их сам я не могу, "
+    "но рассуждать условно готов: если они подтвердятся, тезис станет вероятным, а не "
+    "доказанным. Несогласие без новых доводов оценку не меняет."
+)
+
+
 class MockProvider:
     name = "mock"
 
@@ -52,7 +61,9 @@ class MockProvider:
 
     async def complete(self, request: ChatRequest) -> Completion:
         await asyncio.sleep(self._delay)
-        if CROSS_MARKER in request.user:
+        if JUDGE_CHAT_MARKER in request.system:
+            text = _CHAT_REPLY
+        elif CROSS_MARKER in request.user:
             text = _CROSS
         else:
             key = next((k for k in _FIRST if k in request.system), "линза — ФАКТЫ")

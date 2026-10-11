@@ -31,5 +31,9 @@ class AnalysisNotFound(RationalCheckError):
     pass
 
 
+class ChatUnavailable(RationalCheckError):
+    """The judge cannot take a message now: no verdict, a reply in progress, or the limit."""
+
+
 class AnalysisRunning(RationalCheckError):
     """Operation not allowed while the analysis is still running."""

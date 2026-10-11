@@ -9,12 +9,21 @@ from .dialogue import InputMode
 from .schemas import Verdict
 
 AnalysisStatus = Literal["running", "finished", "failed"]
+ChatRole = Literal["user", "judge"]
 
 
 class TurnRecord(BaseModel):
     round_no: int
     analyst: str
     emoji: str
+    text: str
+    created_at: datetime
+
+
+class ChatMessageRecord(BaseModel):
+    """One message of the verdict discussion with the judge (SPEC §2, §4.6)."""
+
+    role: ChatRole
     text: str
     created_at: datetime
 
@@ -36,6 +45,7 @@ class AnalysisRecord(BaseModel):
     duration_ms: int | None
     turns: list[TurnRecord]
     verdict: Verdict | None
+    chat: list[ChatMessageRecord] = []
 
 
 class AnalysisSummary(BaseModel):
