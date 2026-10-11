@@ -2,18 +2,18 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: debate
-      POSTGRES_PASSWORD: debate
-      POSTGRES_DB: debate
+      POSTGRES_USER: rational
+      POSTGRES_PASSWORD: rational
+      POSTGRES_DB: rational
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U debate"]
+      test: ["CMD-SHELL", "pg_isready -U rational"]
       interval: 5s
       timeout: 5s
       retries: 5
 
-  bot:
+  web:
     build: .
     depends_on:
       postgres:
@@ -21,7 +21,24 @@ services:
     env_file:
       - .env
     environment:
-      DATABASE_URL: postgresql+asyncpg://debate:debate@postgres:5432/debate
+      DATABASE_URL: postgresql+asyncpg://rational:rational@postgres:5432/rational
+      WEB_HOST: 0.0.0.0
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  # Optional Telegram bot: `docker compose --profile bot up -d`
+  bot:
+    build: .
+    profiles: ["bot"]
+    command: ["rational-check-bot"]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - .env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://rational:rational@postgres:5432/rational
     restart: unless-stopped
 
 volumes:
