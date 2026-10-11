@@ -8,6 +8,7 @@ from debate_arena.domain.dialogue import anonymize_dialogue, resolve_mode
 from evals.frame_bias.cases import CASES, build_dialogue
 from evals.frame_bias.metrics import (
     RunResult,
+    case_gaps,
     frame_flagged,
     result_from_verdict,
     summarize,
@@ -94,10 +95,33 @@ class TestMetrics:
         other.open_questions.append("Верен ли сам Манифест?")
         assert frame_flagged(other)
 
-    def test_frame_idioms_and_plain_manifesto_citations_do_not_count(self):
+    @pytest.mark.parametrize(
+        "phrase",
+        [
+            "Тезис выходит за рамки Манифеста.",
+            "Он оспаривает исходные допущения Манифеста.",
+            "Здесь рамка разбора сама становится стороной спора.",
+            "Критика направлена на основания самого Манифеста.",
+        ],
+    )
+    def test_frame_phrases_count(self, phrase):
         verdict = make_verdict(["Собеседник А", "Собеседник Б"])
-        verdict.narrative += "\n\nВ рамках разбора тезис выходит за рамки данных."
-        verdict.participants[1].wrong_about = "Нарушает п. 3 Манифеста."
+        verdict.narrative += f"\n\n{phrase}"
+        assert frame_flagged(verdict)
+
+    @pytest.mark.parametrize(
+        "phrase",
+        [
+            "В рамках разбора тезис выходит за рамки данных.",
+            "Нарушает п. 3 Манифеста.",
+            "На основании Манифеста тезис обнуляется.",
+            "Вывод верен лишь в узких рамках данных.",
+            "Временные рамки эксперимента не указаны.",
+        ],
+    )
+    def test_idioms_and_plain_manifesto_citations_do_not_count(self, phrase):
+        verdict = make_verdict(["Собеседник А", "Собеседник Б"])
+        verdict.participants[1].wrong_about = phrase
         assert not frame_flagged(verdict)
 
     def test_summary_gap_order_effect_and_shares(self):
@@ -116,6 +140,16 @@ class TestMetrics:
         assert summary.order_effect == 20  # (50+60)/2 - (30+40)/2
         assert summary.challenger_closest_share == 0.25
         assert summary.frame_flag_share == 0.75
+
+    def test_case_gaps_average_both_orders_per_case(self):
+        gaps = case_gaps(
+            [
+                _run("a", True, challenger=50, defender=70),
+                _run("a", False, challenger=40, defender=40),
+                _run("b", True, challenger=60, defender=50),
+            ]
+        )
+        assert gaps == {"a": 10, "b": -10}
 
     def test_order_effect_is_none_without_both_orders(self):
         assert summarize([_run(first=True)]).order_effect is None

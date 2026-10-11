@@ -31,10 +31,12 @@ class TestAnalysts:
             assert "ПРИНЦИП БЛАГОЖЕЛАТЕЛЬНОСТИ" in a.system_prompt
 
     def test_no_philosophical_school_personas(self):
+        # Persona text only: FRAME_NOTE may name the school the manifesto belongs to.
         banned = ("Ницше", "Поппер", "Сократ", "стоик", "марксист", "либертариан")
         for a in ANALYSTS:
+            persona = a.system_prompt.replace(MANIFEST, "").replace(FRAME_NOTE, "")
             for word in banned:
-                assert word not in a.system_prompt, (a.name, word)
+                assert word not in persona, (a.name, word)
 
     def test_analyst_goal_is_truth_not_victory(self):
         for a in ANALYSTS:
@@ -49,6 +51,20 @@ class TestFrameDisclosure:
     def test_analysts_do_not_claim_to_stand_outside_any_school(self):
         for a in ANALYSTS:
             assert "не принадлежишь ни к какой философской школе" not in a.system_prompt
+            assert "в пределах, описанных в «Границах рамки»" in a.system_prompt
+
+    def test_judges_do_not_claim_a_frame_free_position(self):
+        assert "кроме рамки Манифеста" in judge_system_prompt(LANG)
+        assert "с учётом «Границ рамки»" in judge_chat_system_prompt(LANG)
+
+    def test_manifesto_has_no_unscoped_absolutes(self):
+        assert "без исключений" not in MANIFEST
+        assert "«Границах рамки»" in MANIFEST.splitlines()[0]
+        pillars = {line[:2]: line for line in MANIFEST.splitlines()[1:]}
+        assert "Утверждения о фактах обсуждаются только" in pillars["1."]
+        assert "гипотезы о фактах" in pillars["1."]
+        assert "Для вывода о фактах нужен критерий фальсификации" in pillars["6."]
+        assert "о нормах или определениях" in pillars["6."]
 
     def test_frame_note_names_the_manifesto_as_a_position(self):
         assert "не нейтральная" in FRAME_NOTE
@@ -85,6 +101,7 @@ class TestRoundPrompts:
         assert "Тип разногласия" in text
         for kind in ("о фактах", "о целях и нормах", "о словах"):
             assert kind in text, kind
+        assert "довод, если о нормах или словах" in text  # not every conclusion is empirical
 
     def test_round_one_includes_optional_question(self):
         text = round_one_user("тезис", "Правда ли это?", LANG)

@@ -11,10 +11,18 @@ from debate_arena.domain.schemas import Verdict
 
 from .cases import Case
 
-# Crude lexical proxy for "the judge named the frame as a party to the dispute". Idioms
-# like «в рамках» / «за рамки» are not about the frame and are cut out before matching.
-_FRAME_IDIOM_RE = re.compile(r"\b(?:в|за)\s+рамк\w*", re.IGNORECASE)
-_FRAME_RE = re.compile(r"рамк\w*|\bсам\w*\s+манифест\w*|\bоснован\w*\s+манифест\w*", re.IGNORECASE)
+# Crude lexical proxy for "the judge named the frame as a party to the dispute": frame-specific
+# phrases only, never a bare «рамка» («временные рамки», «в рамках данных»). Only the new
+# prompts teach this wording, so the share is a compliance check, not a before/after metric.
+_FRAME_RE = re.compile(
+    r"(?<!в )рамк\w*\s+(?:манифест|разбор|анализ)"
+    r"|сам\w*\s+(?:рамк|манифест)"
+    r"|рамк\w*[^.]{0,40}сторон\w*\s+спора"
+    r"|оспарива\w*\s+(?:сам\w*\s+|исходн\w*\s+)?(?:рамк|манифест|основани|допущени)"
+    r"|(?<!на )основани\w*\s+(?:сам\w*\s+)?манифест"
+    r"|допущени\w*\s+манифест",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +41,9 @@ class Summary:
     mean_challenger: float
     mean_defender: float
     mean_gap: float  # defender − challenger; > 0 means the challenger is scored lower
-    order_effect: float | None  # challenger score speaking first − speaking second
+    # Challenger score speaking first − speaking second. Speaking first also means the
+    # anonymised label «Собеседник А», so this mixes order and label effects.
+    order_effect: float | None
     challenger_closest_share: float
     frame_flag_share: float
 
@@ -47,7 +57,7 @@ def frame_flagged(verdict: Verdict) -> bool:
         *(p.right_about for p in verdict.participants),
         *(p.wrong_about for p in verdict.participants),
     ]
-    return any(_FRAME_RE.search(_FRAME_IDIOM_RE.sub("", text)) for text in texts)
+    return any(_FRAME_RE.search(text) for text in texts)
 
 
 def result_from_verdict(
@@ -80,3 +90,15 @@ def summarize(results: Sequence[RunResult]) -> Summary:
         challenger_closest_share=fmean(r.closest_is_challenger for r in results),
         frame_flag_share=fmean(r.frame_flagged for r in results),
     )
+
+
+def case_gaps(results: Sequence[RunResult]) -> dict[str, float]:
+    """Mean defender − challenger gap per case, over both orders and all repeats.
+
+    The cases have no ground truth, so an absolute gap may be deserved; the eval's primary
+    metric is how this per-case gap moves between prompt versions on the same cases.
+    """
+    by_case: dict[str, list[int]] = {}
+    for r in results:
+        by_case.setdefault(r.case_id, []).append(r.defender_score - r.challenger_score)
+    return {case_id: fmean(gaps) for case_id, gaps in by_case.items()}
