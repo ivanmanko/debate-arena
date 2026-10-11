@@ -8,59 +8,75 @@ import pytest
 from pydantic import ValidationError
 
 from debate_arena.domain.exceptions import InvalidVerdict
-from debate_arena.domain.schemas import AnalystScore, ClaimAssessment, Verdict
+from debate_arena.domain.schemas import ClaimAssessment, ParticipantAssessment, Verdict
 from debate_arena.domain.verdict import parse_verdict_text
 from tests.fakes.llm import make_verdict
 
-NAMES = ["Эмпирик", "Логик", "Стилмен"]
+PEOPLE = ["Иван", "Мария"]
 
 
 class TestSchema:
-    def test_score_total(self):
-        s = AnalystScore(
-            analyst="A", rigor=10, evidence=10, charity=10, responsiveness=10, note="x"
-        )
-        assert s.total == 40
-
     def test_rejects_out_of_range_numbers(self):
         with pytest.raises(ValidationError):
-            Verdict.model_validate(make_verdict(NAMES).model_dump() | {"rationality_score": 101})
+            Verdict.model_validate(make_verdict().model_dump() | {"rationality_score": 101})
         with pytest.raises(ValidationError):
-            AnalystScore(analyst="A", rigor=11, evidence=5, charity=5, responsiveness=5, note="")
+            ParticipantAssessment(
+                name="A",
+                truth_proximity=101,
+                position="p",
+                right_about="r",
+                wrong_about="",
+                note="",
+            )
 
-    def test_claim_status_is_closed_set(self):
+    def test_claim_status_is_closed_set_and_by_is_optional(self):
         ClaimAssessment(claim="c", status="unfalsifiable", note="n")
+        ClaimAssessment(claim="c", status="supported", note="n", by="Иван")
         with pytest.raises(ValidationError):
             ClaimAssessment(claim="c", status="maybe", note="n")
 
     def test_conclusion_must_not_be_blank(self):
         with pytest.raises(ValidationError):
-            Verdict.model_validate(make_verdict(NAMES).model_dump() | {"conclusion": "   "})
+            Verdict.model_validate(make_verdict().model_dump() | {"conclusion": "   "})
+
+    def test_no_analyst_scoring_fields(self):
+        fields = set(Verdict.model_fields)
+        assert "scores" not in fields and "most_rational" not in fields
+        assert {"consensus", "open_questions", "participants", "closest_to_truth"} <= fields
 
 
 class TestInvariants:
-    def test_valid_verdict_passes(self):
-        make_verdict(NAMES).validate_for(NAMES)
-
-    def test_missing_analyst_score_is_invalid(self):
-        verdict = make_verdict(NAMES[:2])
+    def test_text_mode_requires_no_participants(self):
+        make_verdict().validate_for([])
         with pytest.raises(InvalidVerdict):
-            verdict.validate_for(NAMES)
+            make_verdict(PEOPLE).validate_for([])
 
-    def test_duplicate_scores_are_invalid(self):
-        verdict = make_verdict(NAMES + [NAMES[0]])
+    def test_dialogue_mode_requires_every_participant_once(self):
+        make_verdict(PEOPLE).validate_for(PEOPLE)
         with pytest.raises(InvalidVerdict):
-            verdict.validate_for(NAMES)
+            make_verdict(PEOPLE[:1]).validate_for(PEOPLE)
+        with pytest.raises(InvalidVerdict):
+            make_verdict(PEOPLE + [PEOPLE[0]]).validate_for(PEOPLE)
 
-    def test_unknown_most_rational_is_invalid(self):
-        verdict = make_verdict(NAMES, most_rational="Кто-то")
+    def test_closest_to_truth_must_be_a_participant(self):
         with pytest.raises(InvalidVerdict):
-            verdict.validate_for(NAMES)
+            make_verdict(PEOPLE, closest="Кто-то").validate_for(PEOPLE)
+        with pytest.raises(InvalidVerdict):
+            make_verdict(PEOPLE, closest=None).validate_for(PEOPLE)
+        with pytest.raises(InvalidVerdict):
+            Verdict.model_validate(
+                make_verdict().model_dump() | {"closest_to_truth": "Иван"}
+            ).validate_for([])
+
+    def test_participant_lookup(self):
+        verdict = make_verdict(PEOPLE)
+        assert verdict.participant("Мария").name == "Мария"
+        assert verdict.participant("Нет") is None
 
 
 class TestParseVerdictText:
     def _payload(self) -> str:
-        return make_verdict(NAMES).model_dump_json()
+        return make_verdict(PEOPLE).model_dump_json()
 
     def test_parses_clean_json(self):
         assert parse_verdict_text(self._payload()).conclusion == "Тестовое заключение"

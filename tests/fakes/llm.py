@@ -6,11 +6,16 @@ from collections import deque
 from collections.abc import Iterable
 
 from debate_arena.domain.ports import ChatRequest, Completion, StructuredCompletion, Usage
-from debate_arena.domain.schemas import AnalystScore, Verdict
+from debate_arena.domain.schemas import ParticipantAssessment, Verdict
 
 
-def make_verdict(analyst_names: Iterable[str], most_rational: str | None = None) -> Verdict:
-    names = list(analyst_names)
+def make_verdict(
+    participants: Iterable[str] | None = None, closest: str | None = "__first__"
+) -> Verdict:
+    """Text-mode verdict by default; pass participant names for a dialogue verdict."""
+    names = list(participants or [])
+    if closest == "__first__":
+        closest = names[0] if names else None
     return Verdict(
         core_question="Тестовый вопрос",
         conclusion="Тестовое заключение",
@@ -24,13 +29,20 @@ def make_verdict(analyst_names: Iterable[str], most_rational: str | None = None)
         steelman="Сильнейшая версия",
         falsification="Появление данных X",
         so_what="Практический вывод",
-        scores=[
-            AnalystScore(
-                analyst=n, rigor=7, evidence=6, charity=8, responsiveness=7, note=f"{n}: ок"
+        consensus=["аналитики сошлись на X"],
+        open_questions=["открыт вопрос Y"],
+        participants=[
+            ParticipantAssessment(
+                name=n,
+                truth_proximity=70 - 10 * i,
+                position=f"позиция {n}",
+                right_about=f"{n} прав в …",
+                wrong_about="" if i == 0 else f"{n} ошибается в …",
+                note=f"{n}: ок",
             )
-            for n in names
+            for i, n in enumerate(names)
         ],
-        most_rational=most_rational or names[0],
+        closest_to_truth=closest,
     )
 
 
@@ -66,7 +78,7 @@ class FakeProvider:
             from debate_arena.domain.exceptions import InvalidVerdict
 
             raise InvalidVerdict("scripted failure")
-        from debate_arena.domain.analysts import ANALYSTS
+        from debate_arena.domain.prompts import participants_from_prompt
 
-        value = self.verdict or make_verdict(a.name for a in ANALYSTS)
+        value = self.verdict or make_verdict(participants_from_prompt(request.user))
         return StructuredCompletion(value=value, usage=Usage(), raw=value.model_dump_json())

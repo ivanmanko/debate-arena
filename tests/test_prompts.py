@@ -8,6 +8,7 @@ from debate_arena.domain.prompts import (
     cross_round_user,
     judge_system_prompt,
     judge_user,
+    participants_from_prompt,
     round_one_user,
     verdict_json_schema,
 )
@@ -35,7 +36,9 @@ class TestAnalysts:
 
     def test_analyst_goal_is_truth_not_victory(self):
         for a in ANALYSTS:
-            assert "не «победить»" in a.system_prompt or "не победить" in a.system_prompt
+            assert "не «победить»" in a.system_prompt
+            assert "одна команда" in a.system_prompt
+            assert "соперничеств" in a.system_prompt
 
 
 class TestRoundPrompts:
@@ -61,31 +64,49 @@ class TestRoundPrompts:
     def test_language_is_injected_everywhere(self):
         assert "English" in round_one_user("t", None, "English")
         assert "English" in cross_round_user("t", None, "x", 2, "English")
-        assert "English" in judge_user("t", None, "x", ["A"], "English")
+        assert "English" in judge_user("t", None, "x", [], "English")
+
+    def test_dialogue_mode_names_participants_and_forbids_winner_framing(self):
+        text = round_one_user("Иван: а\nМария: б", None, LANG, participants=["Иван", "Мария"])
+        assert "ДИАЛОГ" in text
+        assert "Собеседники: Иван, Мария." in text
+        assert "победител" in text.lower()  # explicitly told not to pick one
+        cross = cross_round_user("t", None, "x", 2, LANG, participants=["Иван", "Мария"])
+        assert "Собеседники: Иван, Мария." in cross
+        assert "Собеседники:" not in round_one_user("t", None, LANG)
 
 
 class TestJudgePrompts:
-    def test_judge_system_prompt_is_neutral_and_manifest_bound(self):
+    def test_judge_system_prompt_seeks_truth_not_a_winner(self):
         system = judge_system_prompt(LANG)
         assert "судья" in system.lower()
-        assert "самое рациональное" in system.lower()
+        assert "ближе всего к истине" in system.lower()
+        assert "не выбираешь победителя" in system.lower()
         assert "БРИТВА ОККАМА" in system
 
-    def test_judge_user_lists_analysts_and_transcript(self):
-        text = judge_user("исходный текст", "вопрос?", "[Раунд 1] A: ...", ["A", "B"], LANG)
+    def test_judge_user_text_mode_has_transcript_and_no_participants(self):
+        text = judge_user("исходный текст", "вопрос?", "[Раунд 1] A: ...", [], LANG)
         assert "исходный текст" in text
         assert "вопрос?" in text
         assert "[Раунд 1] A: ..." in text
-        assert "A, B" in text
+        assert "Собеседники:" not in text
+        assert "participants" in text and "closest_to_truth" in text
+
+    def test_judge_user_dialogue_mode_lists_participants(self):
+        text = judge_user("Иван: а\nМария: б", None, "x", ["Иван", "Мария"], LANG)
+        assert "Собеседники: Иван, Мария." in text
+        assert participants_from_prompt(text) == ["Иван", "Мария"]
+        assert participants_from_prompt(judge_user("t", None, "x", [], LANG)) == []
 
     def test_judge_user_embeds_schema_only_when_given(self):
-        without = judge_user("t", None, "x", ["A"], LANG)
-        with_schema = judge_user("t", None, "x", ["A"], LANG, json_schema='{"type":"object"}')
+        without = judge_user("t", None, "x", [], LANG)
+        with_schema = judge_user("t", None, "x", [], LANG, json_schema='{"type":"object"}')
         assert '{"type":"object"}' not in without
         assert '{"type":"object"}' in with_schema
 
     def test_verdict_json_schema_matches_pydantic_model(self):
         schema = verdict_json_schema()
         props = schema["properties"]
-        for field in ("conclusion", "rationality_score", "claims", "scores", "most_rational"):
+        for field in ("conclusion", "rationality_score", "claims", "participants", "consensus"):
             assert field in props
+        assert "scores" not in props
