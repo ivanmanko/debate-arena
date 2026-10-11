@@ -67,7 +67,8 @@ class Settings(BaseSettings):
     # --- Analysis shape (SPEC §7) ---
     default_rounds: int = 2
     max_rounds: int = 3
-    max_text_chars: int = 20_000
+    # ~82k tokens of Russian (2.43 chars/token, measured): far below the 1M context (SPEC §7).
+    max_text_chars: int = 200_000
     max_question_chars: int = 500
     turn_max_tokens: int = 6_000
     judge_max_tokens: int = 16_000

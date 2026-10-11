@@ -112,6 +112,7 @@ textarea, input[type="text"], select { font: inherit; color: var(--text); backgr
 textarea { resize: vertical; min-height: 160px; line-height: 1.55; }
 textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent); border-color: var(--primary); }
 .counter { position: absolute; right: 10px; bottom: 8px; font-size: 12px; color: var(--text-muted); background: var(--surface-2); padding: 0 4px; }
+.counter.over { color: var(--bad); font-weight: 600; }
 .compose-row { display: grid; grid-template-columns: auto auto 1fr auto; gap: 16px; align-items: end; }
 .segmented { display: inline-flex; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; background: var(--surface-2); }
 .segmented button { border: 0; background: transparent; padding: 9px 13px; font: inherit; font-weight: 600; cursor: pointer; color: var(--text-muted); }

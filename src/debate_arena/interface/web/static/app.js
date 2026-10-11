@@ -66,7 +66,6 @@
     state.analysts.forEach((a, i) => { state.colors[a.name] = palette[i % palette.length]; });
     state.rounds = state.config.default_rounds;
     $("#counter-max").textContent = state.config.max_text_chars;
-    $("#text").maxLength = state.config.max_text_chars;
     const select = $("#model");
     select.innerHTML = "";
     for (const m of state.config.models) select.append(el("option", { value: m.id, text: m.label }));
@@ -119,7 +118,12 @@
       const looksDialogue = names.size >= 2 && share >= 0.6;
       $("#mode-hint").textContent = state.mode === "auto" ? (looksDialogue ? `· похоже на диалог: ${[...names].slice(0, 4).join(", ")}` : "· похоже на текст") : "";
     };
-    text.addEventListener("input", () => { $("#counter").textContent = text.value.length; updateModeHint(); });
+    // No maxlength: the browser would silently cut a long paste. Over the limit the counter turns red and submit says so.
+    const updateCounter = () => {
+      $("#counter").textContent = text.value.length;
+      $(".counter").classList.toggle("over", text.value.trim().length > maxTextChars());
+    };
+    text.addEventListener("input", () => { updateCounter(); updateModeHint(); });
     initFileInput(text);
     $("#mode").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-mode]"); if (!b) return;
@@ -140,11 +144,13 @@
       const err = $("#compose-error"); err.classList.add("hidden");
       const body = { text: text.value, question: $("#question").value || null, rounds: state.rounds, model: $("#model").value, mode: state.mode };
       if (!body.text.trim()) { err.textContent = "Вставьте текст для разбора."; err.classList.remove("hidden"); return; }
+      const length = body.text.trim().length;
+      if (length > maxTextChars()) { err.textContent = `В тексте ${length} символов, лимит — ${maxTextChars()}. Сократите текст.`; err.classList.remove("hidden"); return; }
       $("#submit").disabled = true;
       try {
         const { id, legend } = await api.post("/api/analyses", body);
         if (legend && Object.keys(legend).length) { try { localStorage.setItem(`legend:${id}`, JSON.stringify(legend)); } catch (_) { /* ignore */ } }
-        text.value = ""; $("#question").value = ""; $("#counter").textContent = "0";
+        text.value = ""; $("#question").value = ""; updateCounter();
         location.hash = `#/a/${id}`;
         await loadHistory();
       } catch (ex) { err.textContent = ex.message; err.classList.remove("hidden"); }
@@ -152,6 +158,8 @@
     });
     $("#btn-new").addEventListener("click", () => { location.hash = "#/new"; });
   }
+
+  const maxTextChars = () => state.config?.max_text_chars ?? Infinity;
 
   // ---------- Text files (.txt / .md) — read in the browser, never truncated (SPEC §4.0c) ----------
   const FILE_EXTENSIONS = [".txt", ".md"];
@@ -182,7 +190,7 @@
     const load = async (file) => {
       err.classList.add("hidden");
       try {
-        const content = await readTextFile(file, state.config?.max_text_chars ?? Number(text.maxLength));
+        const content = await readTextFile(file, maxTextChars());
         if (text.value.trim() && !confirm(`Заменить введённый текст содержимым «${file.name}»?`)) return;
         text.value = content;
         text.dispatchEvent(new Event("input"));
@@ -609,7 +617,7 @@
   function rerun() {
     const d = state.current.detail;
     location.hash = "#/new";
-    $("#text").value = d.source_text; $("#question").value = d.question || ""; $("#counter").textContent = d.source_text.length;
+    $("#text").value = d.source_text; $("#question").value = d.question || ""; $("#text").dispatchEvent(new Event("input"));
     window.scrollTo({ top: 0 });
   }
 
