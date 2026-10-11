@@ -6,7 +6,7 @@ from __future__ import annotations
 import json
 import re
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from .exceptions import InvalidVerdict
 from .schemas import Verdict
@@ -21,6 +21,11 @@ def strip_think(text: str) -> str:
 
 def parse_verdict_text(raw: str) -> Verdict:
     """Accept clean JSON, fenced JSON, or JSON surrounded by prose; strip ``<think>``."""
+    return parse_json_model(raw, Verdict)
+
+
+def parse_json_model[ModelT: BaseModel](raw: str, schema: type[ModelT]) -> ModelT:
+    """Generic form of :func:`parse_verdict_text` for any Pydantic model."""
     text = strip_think(raw).strip()
     candidates = [text]
     candidates += [m.strip() for m in _FENCE_RE.findall(text)]
@@ -31,7 +36,7 @@ def parse_verdict_text(raw: str) -> Verdict:
     last_error: Exception | None = None
     for candidate in candidates:
         try:
-            return Verdict.model_validate_json(candidate)
+            return schema.model_validate_json(candidate)
         except (ValidationError, json.JSONDecodeError, ValueError) as exc:
             last_error = exc
     raise InvalidVerdict(f"judge did not return a valid verdict: {last_error}") from last_error

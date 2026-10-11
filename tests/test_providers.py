@@ -232,3 +232,60 @@ class TestAnthropicProvider:
         )
         assert result.value is verdict
         assert client.messages.kwargs["output_format"] is Verdict
+
+
+class TestDeepSeekRetries:
+    async def test_retries_transient_status_then_succeeds(self):
+        statuses = iter([503, 429, 200])
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            status = next(statuses)
+            if status != 200:
+                return httpx.Response(status, json={"error": "later"})
+            return httpx.Response(200, json={"choices": [{"message": {"content": "ok"}}]})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://x")
+        provider = DeepSeekProvider(
+            api_key="k", temperature=0.1, max_retries=2, retry_base_s=0, http_client=client
+        )
+        result = await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=5))
+        assert result.text == "ok"
+
+    async def test_gives_up_after_max_retries(self):
+        def handler(request: httpx.Request) -> httpx.Response:
+            return httpx.Response(502, json={"error": "down"})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://x")
+        provider = DeepSeekProvider(
+            api_key="k", temperature=0.1, max_retries=1, retry_base_s=0, http_client=client
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=5))
+
+    async def test_client_error_is_not_retried(self):
+        calls = 0
+
+        def handler(request: httpx.Request) -> httpx.Response:
+            nonlocal calls
+            calls += 1
+            return httpx.Response(400, json={"error": "bad"})
+
+        client = httpx.AsyncClient(transport=httpx.MockTransport(handler), base_url="https://x")
+        provider = DeepSeekProvider(
+            api_key="k", temperature=0.1, max_retries=3, retry_base_s=0, http_client=client
+        )
+        with pytest.raises(httpx.HTTPStatusError):
+            await provider.complete(ChatRequest(model="m", system="s", user="u", max_tokens=5))
+        assert calls == 1
+
+
+class TestProviderRegistry:
+    async def test_memoises_per_model_and_closes(self):
+        from debate_arena.infrastructure.llm.factory import ProviderRegistry
+
+        registry = ProviderRegistry(_settings(deepseek_api_key="k"))
+        first = registry.get("deepseek/deepseek-chat")
+        assert registry.get("deepseek/deepseek-chat") is first
+        assert registry.get("mock/rational") is not first
+        await registry.aclose()
+        assert registry.get("deepseek/deepseek-chat") is not first

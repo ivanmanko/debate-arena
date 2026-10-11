@@ -15,10 +15,9 @@ from . import __version__
 from .application.service import AnalysisService, ProviderFactory
 from .config import Settings, get_settings
 from .domain.ports import AnalysisRepository
-from .domain.schemas import parse_model_ref
 from .infrastructure.db.repo import SqlAlchemyAnalysisRepository
 from .infrastructure.db.session import Database
-from .infrastructure.llm.factory import build_provider
+from .infrastructure.llm.factory import ProviderRegistry
 from .interface.api.routes import router
 
 logger = logging.getLogger(__name__)
@@ -43,9 +42,8 @@ def create_app(
             database = Database(settings.database_url)
             await database.init()
             active_repo = SqlAlchemyAnalysisRepository(database.sessions)
-        factory = provider_factory or (
-            lambda model: build_provider(parse_model_ref(model), settings)
-        )
+        registry = ProviderRegistry(settings)
+        factory = provider_factory or registry.get
         service = AnalysisService(repo=active_repo, provider_factory=factory, settings=settings)
         await service.recover_interrupted()
         app.state.settings = settings
@@ -61,6 +59,8 @@ def create_app(
         try:
             yield
         finally:
+            await service.shutdown()
+            await registry.aclose()
             if database is not None:
                 await database.dispose()
 

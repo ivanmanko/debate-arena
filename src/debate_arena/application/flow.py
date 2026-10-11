@@ -41,6 +41,8 @@ PersistVerdict = Callable[[Verdict], Awaitable[None]]
 
 @dataclass(frozen=True)
 class FlowConfig:
+    """Per-analysis knobs, resolved by the service from ``Settings`` (SPEC §7)."""
+
     rounds: int
     language: str
     analyst_model: str
@@ -60,6 +62,8 @@ class FlowResult:
 
 
 class AnalysisFlow:
+    """Runs one analysis: blind round, cross rounds, judge. Emits SPEC §3.4 events."""
+
     def __init__(
         self,
         *,
@@ -130,6 +134,8 @@ class AnalysisFlow:
         finally:
             for task in tasks:
                 task.cancel()
+            # Retrieve results of cancelled/failed siblings so nothing is logged at GC time.
+            await asyncio.gather(*tasks, return_exceptions=True)
 
     async def _cross_round(self, round_no: int) -> None:
         await self.emit(AnalysisEvent("round", {"round_no": round_no, "kind": CROSS_ROUND_KIND}))
@@ -155,7 +161,14 @@ class AnalysisFlow:
         )
         started = time.monotonic()
         completion = await self.analyst_provider.complete(request)
-        self._account(completion.usage, "analyst", round_no, started)
+        self._account(
+            completion.usage,
+            "analyst",
+            round_no,
+            started,
+            self.analyst_provider.name,
+            self.config.analyst_model,
+        )
         return completion.text.strip()
 
     async def _record_turn(self, round_no: int, analyst: AnalystSpec, text: str) -> None:
@@ -182,7 +195,7 @@ class AnalysisFlow:
         )
         names = [a.name for a in self.analysts]
         # Providers without native structured output need the schema in the prompt;
-        # Anthropic ignores the extra text harmlessly, so we always embed it.
+        # Anthropic gets it through ``output_format`` instead.
         schema_text = (
             None if self.judge_provider.name == "anthropic" else verdict_json_schema_text()
         )
@@ -205,7 +218,14 @@ class AnalysisFlow:
             started = time.monotonic()
             try:
                 result = await self.judge_provider.complete_structured(request, Verdict)
-                self._account(result.usage, "judge", 0, started)
+                self._account(
+                    result.usage,
+                    "judge",
+                    0,
+                    started,
+                    self.judge_provider.name,
+                    self.config.judge_model,
+                )
                 result.value.validate_for(names)
             except InvalidVerdict as exc:
                 last_error = exc
@@ -222,12 +242,16 @@ class AnalysisFlow:
 
     # --- stats ------------------------------------------------------------------
 
-    def _account(self, usage: Usage, role: str, round_no: int, started: float) -> None:
+    def _account(
+        self, usage: Usage, role: str, round_no: int, started: float, provider: str, model: str
+    ) -> None:
         self._calls += 1
         self._in_tokens += usage.input_tokens
         self._out_tokens += usage.output_tokens
         logger.info(
-            "llm.call role=%s analysis=%s round=%s ms=%d in=%d out=%d",
+            "llm.call provider=%s model=%s role=%s analysis=%s round=%s ms=%d in=%d out=%d",
+            provider,
+            model,
             role,
             self.analysis_id,
             round_no,

@@ -37,3 +37,12 @@ def test_split_message_respects_limit_on_paragraphs():
 def test_split_message_hard_splits_a_single_huge_paragraph():
     chunks = presenter.split_message("x" * 1500, limit=700)
     assert [len(c) for c in chunks] == [700, 700, 100]
+
+
+def test_split_never_cuts_inside_a_tag_and_prefers_spaces():
+    words = " ".join(f"<b>слово{i}</b>" for i in range(400))  # ~5 500 chars, no newlines
+    chunks = presenter.split_message(words, limit=700)
+    assert all(len(c) <= 700 for c in chunks)
+    for chunk in chunks:
+        assert chunk.count("<") == chunk.count(">")
+        assert not chunk.startswith(" ") and not chunk.endswith(" ")

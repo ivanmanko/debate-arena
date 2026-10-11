@@ -21,7 +21,7 @@ class Analysis(Base):
     __tablename__ = "analyses"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    title: Mapped[str] = mapped_column(String(128))
+    title: Mapped[str] = mapped_column(Text)  # length bounded by TITLE_CHARS (SPEC §7)
     source_text: Mapped[str] = mapped_column(Text)
     question: Mapped[str | None] = mapped_column(String(512), nullable=True)
     rounds: Mapped[int] = mapped_column(Integer)

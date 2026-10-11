@@ -11,7 +11,7 @@ from ...domain.schemas import Verdict
 
 class AnalysisRequest(BaseModel):
     text: str = Field(min_length=1)
-    question: str | None = Field(default=None, max_length=500)
+    question: str | None = None  # length validated by the service against settings
     rounds: int | None = Field(default=None, ge=1)
     model: str | None = None
 

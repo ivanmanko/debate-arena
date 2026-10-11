@@ -29,7 +29,10 @@ def _bar(value: int) -> str:
 
 
 def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
-    """Split on paragraph boundaries so no chunk exceeds ``limit`` characters."""
+    """Split so no chunk exceeds ``limit``: on blank lines, then lines, then spaces.
+
+    A hard cut never lands inside an HTML tag, so Telegram can parse every chunk.
+    """
     if len(text) <= limit:
         return [text]
     chunks: list[str] = []
@@ -41,13 +44,40 @@ def split_message(text: str, limit: int = MESSAGE_LIMIT) -> list[str]:
             continue
         if current:
             chunks.append(current)
-        while len(paragraph) > limit:
-            chunks.append(paragraph[:limit])
-            paragraph = paragraph[limit:]
-        current = paragraph
+        current = ""
+        for piece in _split_long(paragraph, limit):
+            candidate = piece if not current else f"{current}\n\n{piece}"
+            if len(candidate) <= limit:
+                current = candidate
+            else:
+                if current:
+                    chunks.append(current)
+                current = piece
     if current:
         chunks.append(current)
     return chunks
+
+
+def _split_long(paragraph: str, limit: int) -> list[str]:
+    """Cut an over-long paragraph at line breaks, then spaces, never inside ``<…>``."""
+    if len(paragraph) <= limit:
+        return [paragraph]
+    pieces: list[str] = []
+    rest = paragraph
+    while len(rest) > limit:
+        cut = rest.rfind("\n", 0, limit)
+        if cut <= 0:
+            cut = rest.rfind(" ", 0, limit)
+        if cut <= 0:
+            cut = limit
+        open_tag = rest.rfind("<", 0, cut)
+        if open_tag != -1 and rest.find(">", open_tag, cut) == -1:
+            cut = open_tag if open_tag > 0 else cut
+        pieces.append(rest[:cut].rstrip())
+        rest = rest[cut:].lstrip()
+    if rest:
+        pieces.append(rest)
+    return pieces
 
 
 def render_started(title: str, analysts: Iterable[AnalystSpec], rounds: int, mock: bool) -> str:

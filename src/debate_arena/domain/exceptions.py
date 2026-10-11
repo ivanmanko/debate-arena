@@ -11,6 +11,10 @@ class ProviderNotConfigured(RationalCheckError):
     """Selected provider has no API key (or unknown provider)."""
 
 
+class ProviderError(RationalCheckError):
+    """Transport or response-shape failure of a provider (not a schema violation)."""
+
+
 class ProviderRefused(RationalCheckError):
     """The model declined the request (Anthropic ``stop_reason == "refusal"``)."""
 

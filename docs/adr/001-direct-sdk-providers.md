@@ -34,7 +34,8 @@ Anthropic, DeepSeek оставить как опцию.
    не поддерживает `output_config`/structured outputs Anthropic в актуальном виде, лишний
    слой трансляции ошибок, при двух провайдерах выигрыш нулевой.
 2. **`openai` SDK с `base_url` DeepSeek.** Чуть меньше кода, чем httpx; rejected: ещё одна
-   крупная зависимость ради одного POST; httpx уже транзитивно есть у anthropic.
+   крупная зависимость ради одного POST; `httpx` — прямая лёгкая зависимость (anthropic 1.x
+   живёт на `httpx2`, это другой пакет).
 3. **Anthropic через OpenAI-совместимый шим.** rejected: теряем structured outputs,
    effort, refusal-семантику; официальный SDK — единственный поддерживаемый путь.
 

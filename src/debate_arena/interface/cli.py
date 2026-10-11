@@ -14,10 +14,10 @@ import sys
 
 from ..application.service import AnalysisService
 from ..config import get_settings
-from ..domain.schemas import Verdict, parse_model_ref
+from ..domain.schemas import Verdict
 from ..infrastructure.db.repo import SqlAlchemyAnalysisRepository
 from ..infrastructure.db.session import Database
-from ..infrastructure.llm.factory import build_provider
+from ..infrastructure.llm.factory import ProviderRegistry
 
 
 def _print_verdict(verdict: Verdict) -> None:
@@ -61,9 +61,10 @@ async def _main(text: str, question: str | None, rounds: int | None, model: str 
     settings = get_settings()
     database = Database(settings.database_url)
     await database.init()
+    registry = ProviderRegistry(settings)
     service = AnalysisService(
         repo=SqlAlchemyAnalysisRepository(database.sessions),
-        provider_factory=lambda m: build_provider(parse_model_ref(m), settings),
+        provider_factory=registry.get,
         settings=settings,
     )
     if settings.use_mock:
@@ -84,6 +85,7 @@ async def _main(text: str, question: str | None, rounds: int | None, model: str 
                 status = event.data["status"]
                 print(f"\n[{status}] разбор #{analysis_id}, {event.data.get('duration_ms')} мс")
     finally:
+        await registry.aclose()
         await database.dispose()
     return 0 if status == "finished" else 1
 

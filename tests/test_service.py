@@ -76,13 +76,49 @@ class TestStartAndRun:
         service = AnalysisService(repo=repo, provider_factory=factory, settings=_settings())
         analysis_id = await service.start(text="t", question=None, rounds=1, model="mock/rational")
         await service.wait(analysis_id)
-        assert seen == ["mock/rational", "mock/rational"]
+        assert seen == ["mock/rational"]
         assert repo.rows[analysis_id].model_analyst == "mock/rational"
 
     async def test_unknown_model_rejected(self):
         service = _service()
         with pytest.raises(ValueError):
             await service.start(text="t", question=None, rounds=1, model="openai/gpt")
+        with pytest.raises(ValueError):  # well-formed but not in available_models (SPEC §6 №6)
+            await service.start(
+                text="t", question=None, rounds=1, model="anthropic/claude-opus-5-5"
+            )
+
+    async def test_same_model_reuses_one_provider_for_analysts_and_judge(self):
+        built: list[str] = []
+
+        def factory(model: str):
+            built.append(model)
+            return FakeProvider()
+
+        service = AnalysisService(
+            repo=InMemoryRepository(), provider_factory=factory, settings=_settings()
+        )
+        analysis_id = await service.start(text="t", question=None, rounds=1, model=None)
+        await service.wait(analysis_id)
+        assert built == ["mock/rational"]
+
+    async def test_shutdown_cancels_running_and_marks_interrupted(self):
+        import asyncio
+
+        class Slow(FakeProvider):
+            async def complete(self, request):
+                await asyncio.sleep(10)
+                return await super().complete(request)
+
+        repo = InMemoryRepository()
+        service = _service(repo=repo, provider=Slow())
+        analysis_id = await service.start(text="t", question=None, rounds=1, model=None)
+        await asyncio.sleep(0.05)
+        await service.shutdown()
+        record = await service.get(analysis_id)
+        assert record.status == "failed" and record.error == "interrupted"
+        events = await _collect(service, analysis_id)
+        assert events[-1].type == "done" and events[-1].data["status"] == "failed"
 
 
 class TestEvents:

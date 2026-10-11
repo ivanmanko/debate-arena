@@ -149,7 +149,7 @@
     let detail;
     try { detail = await api.get(`/api/analyses/${id}`); }
     catch (err) { root.append(el("div", { class: "notice notice-error", text: `Разбор не найден: ${err.message}` })); return; }
-    state.current = { id, detail, roundsSeen: new Set(), chips: {}, startedAt: Date.now() - (detail.duration_ms || 0) };
+    state.current = { id, detail, seen: new Set(), chips: {}, startedAt: Date.parse(detail.created_at) || Date.now() };
     renderHistory();
     root.append(buildAnalysis(detail));
     for (const t of detail.turns) addTurn(t);
@@ -228,6 +228,9 @@
   const inline = (s) => esc(s).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>").replace(/(^|\n)#{1,4}\s*/g, "$1");
 
   function addTurn(t) {
+    const key = `${t.round_no}:${t.analyst}`; // each analyst speaks once per round
+    if (state.current.seen.has(key)) return;
+    state.current.seen.add(key);
     const box = roundContainer(t.round_no, t.kind);
     $(`[data-typing="${CSS.escape(t.analyst)}"]`, box)?.remove();
     const analyst = state.analysts.find((a) => a.name === t.analyst);
@@ -264,7 +267,7 @@
     es.addEventListener("started", () => { /* chips already built */ });
     es.addEventListener("round", (e) => { const d = JSON.parse(e.data); currentRound = d.round_no; roundContainer(d.round_no, d.kind); });
     es.addEventListener("typing", (e) => { const d = JSON.parse(e.data); addTyping(d.analyst, d.emoji, currentRound); });
-    es.addEventListener("turn", (e) => { const d = JSON.parse(e.data); if (!alreadyHaveTurn(d)) addTurn(d); });
+    es.addEventListener("turn", (e) => addTurn(JSON.parse(e.data)));
     es.addEventListener("verdict", (e) => { renderVerdict(JSON.parse(e.data), state.current.detail); setChip("Судья", "done"); });
     // "error" is both the EventSource connection event (no data) and our SPEC §3.4 event (with data).
     es.addEventListener("error", (e) => { if (e.data) showError(JSON.parse(e.data).message); });
@@ -275,11 +278,6 @@
       finishChips();
       await loadHistory();
     });
-  }
-  function alreadyHaveTurn(d) {
-    const box = $(`[data-round="${d.round_no}"]`);
-    if (!box) return false;
-    return [...box.querySelectorAll(".turn:not(.typing) .who")].some((w) => w.textContent === d.analyst && w.closest(".turn").textContent.includes(d.text.slice(0, 40)));
   }
 
   // ---------- Verdict ----------

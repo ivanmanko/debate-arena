@@ -8,13 +8,16 @@ app falls back to the mock engine and says so (SPEC §6 №7).
 from __future__ import annotations
 
 from functools import lru_cache
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain.schemas import parse_model_ref
 
 MOCK_MODEL = "mock/rational"
+
+Effort = Literal["low", "medium", "high", "xhigh", "max"]
 
 # Catalogue shown in the UI model picker, per provider (only providers with a key).
 _ANTHROPIC_MODELS = [
@@ -47,9 +50,13 @@ class Settings(BaseSettings):
     model_analyst: str = "anthropic/claude-opus-5-5"
     model_judge: str = "anthropic/claude-opus-5-5"
     # Opus 5.5: thinking is always on; effort is the only depth control (SPEC §7).
-    analyst_effort: str = "medium"
-    judge_effort: str = "high"
+    analyst_effort: Effort = "medium"
+    judge_effort: Effort = "high"
     deepseek_temperature: float = 0.3
+    # Mirrors the Anthropic SDK default of 2 retries; DeepSeek goes through plain httpx.
+    deepseek_max_retries: int = 2
+    # Reasoner replies can take minutes.
+    deepseek_timeout_s: float = 600.0
     mock_llm: bool = False
 
     # --- Analysis shape (SPEC §7) ---
@@ -69,11 +76,20 @@ class Settings(BaseSettings):
     sse_heartbeat_s: float = 15.0
     history_limit: int = 50
     title_chars: int = 80
+    # Finished runs kept in memory for SSE replay before falling back to the DB.
+    runs_kept_in_memory: int = 50
     bot_token: str = ""
     # Shown in bot replies so a chat user can open the full verdict in the web UI.
     public_url: str = ""
 
+    @field_validator("model_analyst", "model_judge")
+    @classmethod
+    def _valid_model_ref(cls, value: str) -> str:
+        parse_model_ref(value)  # raises ValueError with a readable message
+        return value
+
     def has_key(self, provider: str) -> bool:
+        """Whether the provider can be used: has an API key, or needs none (mock)."""
         return {
             "anthropic": bool(self.anthropic_api_key),
             "deepseek": bool(self.deepseek_api_key),

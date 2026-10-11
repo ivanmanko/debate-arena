@@ -4,9 +4,12 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from collections.abc import AsyncIterator
 
 from ...domain.events import AnalysisEvent
+
+logger = logging.getLogger(__name__)
 
 _END = object()
 
@@ -25,6 +28,9 @@ async def sse_stream(
         try:
             async for event in events:
                 await queue.put(event)
+        except Exception as exc:  # noqa: BLE001 — surface to the client, then close the stream
+            logger.exception("sse source failed")
+            await queue.put(AnalysisEvent("error", {"message": f"{type(exc).__name__}: {exc}"}))
         finally:
             await queue.put(_END)
 
@@ -41,3 +47,4 @@ async def sse_stream(
             yield format_event(item)  # type: ignore[arg-type]
     finally:
         task.cancel()
+        await asyncio.gather(task, return_exceptions=True)

@@ -21,19 +21,18 @@ from ..domain.exceptions import (
     AnalysisNotFound,
     AnalysisRunning,
     InvalidVerdict,
+    ProviderError,
     ProviderRefused,
 )
 from ..domain.ports import AnalysisRepository, ChatProvider
 from ..domain.records import AnalysisRecord, AnalysisSummary
-from ..domain.schemas import AnalystSpec, Verdict, parse_model_ref
-from .flow import JUDGE_EMOJI, JUDGE_NAME, AnalysisFlow, FlowConfig
+from ..domain.schemas import AnalystSpec, parse_model_ref
+from .flow import CROSS_ROUND_KIND, ROUND_ONE_KIND, AnalysisFlow, FlowConfig
 
 logger = logging.getLogger(__name__)
 
 ProviderFactory = Callable[[str], ChatProvider]
 
-# Finished runs kept in memory for fast SSE replay before falling back to the DB.
-_FINISHED_RUNS_KEPT = 50
 _WS_RE = re.compile(r"\s+")
 
 
@@ -46,6 +45,8 @@ class _Run:
 
 
 class AnalysisService:
+    """Use-case facade shared by the web API, the bot and the CLI."""
+
     def __init__(
         self,
         *,
@@ -82,10 +83,14 @@ class AnalysisService:
             raise ValueError(f"rounds must be within 1..{s.max_rounds}")
         if model:
             parse_model_ref(model)  # raises ValueError on malformed / unknown provider
+            if model not in {m.id for m in s.available_models}:
+                raise ValueError(f"unknown model {model!r}; see GET /api/config")
         model_analyst = model or s.effective_model_analyst
         model_judge = model or s.effective_model_judge
         analyst_provider = self._providers(model_analyst)
-        judge_provider = self._providers(model_judge)
+        judge_provider = (
+            analyst_provider if model_judge == model_analyst else self._providers(model_judge)
+        )
 
         analysis_id = await self._repo.create(
             source_text=text,
@@ -123,14 +128,25 @@ class AnalysisService:
             analysis_id=analysis_id,
         )
         run.task = asyncio.create_task(self._execute(analysis_id, run, flow))
+        run.task.add_done_callback(_log_task_failure)
         return analysis_id
 
     async def wait(self, analysis_id: int) -> None:
+        """Await the background run (tests, CLI). No-op when it is not in memory."""
         run = self._runs.get(analysis_id)
         if run and run.task:
             await run.task
 
+    async def shutdown(self) -> None:
+        """Cancel running analyses so subscribers get ``done`` and the DB sees ``failed``."""
+        tasks = [r.task for r in self._runs.values() if r.task and not r.done]
+        for task in tasks:
+            task.cancel()
+        if tasks:
+            await asyncio.gather(*tasks, return_exceptions=True)
+
     async def delete(self, analysis_id: int) -> bool:
+        """Delete a finished analysis; running ones raise ``AnalysisRunning``."""
         run = self._runs.get(analysis_id)
         if run and not run.done:
             raise AnalysisRunning(f"analysis {analysis_id} is still running")
@@ -149,17 +165,20 @@ class AnalysisService:
     # --- queries ----------------------------------------------------------------
 
     async def get(self, analysis_id: int) -> AnalysisRecord:
+        """Full record with turns and verdict; raises ``AnalysisNotFound``."""
         record = await self._repo.get(analysis_id)
         if record is None:
             raise AnalysisNotFound(str(analysis_id))
         return record
 
     async def list(self, limit: int | None = None) -> list[AnalysisSummary]:
+        """Newest first, capped by ``history_limit`` (SPEC §3.5)."""
         return await self._repo.list(
             min(limit or self._settings.history_limit, self._settings.history_limit)
         )
 
     def is_running(self, analysis_id: int) -> bool:
+        """True while the run is alive in this process."""
         run = self._runs.get(analysis_id)
         return bool(run and not run.done)
 
@@ -188,6 +207,7 @@ class AnalysisService:
     async def _execute(self, analysis_id: int, run: _Run, flow: AnalysisFlow) -> None:
         started = time.monotonic()
         status, error, calls, usage_in, usage_out = "finished", None, 0, 0, 0
+        cancelled = False
         try:
             result = await flow.run()
             calls, usage_in, usage_out = (
@@ -195,9 +215,10 @@ class AnalysisService:
                 result.usage.input_tokens,
                 result.usage.output_tokens,
             )
-        except ProviderRefused as exc:
-            status, error = "failed", str(exc)
-        except InvalidVerdict as exc:
+        except asyncio.CancelledError:
+            # Process shutdown: record the interruption, then re-raise after bookkeeping.
+            status, error, cancelled = "failed", "interrupted", True
+        except (ProviderRefused, InvalidVerdict, ProviderError) as exc:
             status, error = "failed", str(exc)
         except Exception as exc:  # noqa: BLE001 — any provider/network failure ends the run
             logger.exception("analysis %s failed", analysis_id)
@@ -231,6 +252,8 @@ class AnalysisService:
             async with run.condition:
                 run.done = True
                 run.condition.notify_all()
+        if cancelled:
+            raise asyncio.CancelledError
 
     @staticmethod
     async def _publish(run: _Run, event: AnalysisEvent) -> None:
@@ -256,7 +279,7 @@ class AnalysisService:
         for turn in record.turns:
             if turn.round_no != current_round:
                 current_round = turn.round_no
-                kind = "Независимый разбор" if current_round == 1 else "Перекрёстная проверка"
+                kind = ROUND_ONE_KIND if current_round == 1 else CROSS_ROUND_KIND
                 events.append(AnalysisEvent("round", {"round_no": current_round, "kind": kind}))
             events.append(
                 AnalysisEvent(
@@ -288,8 +311,14 @@ class AnalysisService:
 
     def _evict_finished(self) -> None:
         finished = [i for i, r in self._runs.items() if r.done]
-        for analysis_id in finished[: max(0, len(finished) - _FINISHED_RUNS_KEPT)]:
+        kept = self._settings.runs_kept_in_memory
+        for analysis_id in finished[: max(0, len(finished) - kept)]:
             self._runs.pop(analysis_id, None)
 
 
-__all__ = ["AnalysisService", "JUDGE_EMOJI", "JUDGE_NAME", "Verdict"]
+def _log_task_failure(task: asyncio.Task) -> None:
+    if task.cancelled():
+        return
+    exc = task.exception()
+    if exc is not None:
+        logger.error("analysis task crashed after bookkeeping: %r", exc)

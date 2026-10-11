@@ -9,13 +9,11 @@ from aiogram import Bot, Dispatcher
 
 from ...application.service import AnalysisService
 from ...config import get_settings
-from ...domain.schemas import parse_model_ref
 from ...infrastructure.db.repo import SqlAlchemyAnalysisRepository
 from ...infrastructure.db.session import Database
-from ...infrastructure.llm.factory import build_provider
+from ...infrastructure.llm.factory import ProviderRegistry
 from .handlers import router
 
-logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
 logger = logging.getLogger(__name__)
 
 
@@ -28,9 +26,10 @@ async def main() -> None:
 
     database = Database(settings.database_url)
     await database.init()
+    registry = ProviderRegistry(settings)
     service = AnalysisService(
         repo=SqlAlchemyAnalysisRepository(database.sessions),
-        provider_factory=lambda model: build_provider(parse_model_ref(model), settings),
+        provider_factory=registry.get,
         settings=settings,
     )
     await service.recover_interrupted()
@@ -45,10 +44,15 @@ async def main() -> None:
         await dispatcher.start_polling(bot)
     finally:
         await bot.session.close()
+        await service.shutdown()
+        await registry.aclose()
         await database.dispose()
 
 
 def run() -> None:
+    logging.basicConfig(
+        level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s"
+    )
     asyncio.run(main())
 
 

@@ -14,6 +14,8 @@ from .models import Analysis, Turn, VerdictRow
 
 
 class SqlAlchemyAnalysisRepository:
+    """``AnalysisRepository`` over an async SQLAlchemy session factory."""
+
     def __init__(self, sessions: async_sessionmaker[AsyncSession]) -> None:
         self._sessions = sessions
 
@@ -105,7 +107,7 @@ class SqlAlchemyAnalysisRepository:
                     id=row.id,
                     title=row.title,
                     status=row.status,
-                    created_at=row.created_at,
+                    created_at=_utc(row.created_at),
                     rounds=row.rounds,
                     model_analyst=row.model_analyst,
                     rationality_score=score,
@@ -134,6 +136,13 @@ class SqlAlchemyAnalysisRepository:
             return int(result.rowcount or 0)
 
 
+def _utc(value: datetime | None) -> datetime | None:
+    """SQLite returns naive datetimes even for timezone-aware columns; they are UTC."""
+    if value is None or value.tzinfo is not None:
+        return value
+    return value.replace(tzinfo=UTC)
+
+
 def _to_record(row: Analysis) -> AnalysisRecord:
     return AnalysisRecord(
         id=row.id,
@@ -145,8 +154,8 @@ def _to_record(row: Analysis) -> AnalysisRecord:
         model_judge=row.model_judge,
         status=row.status,
         error=row.error,
-        created_at=row.created_at,
-        finished_at=row.finished_at,
+        created_at=_utc(row.created_at),
+        finished_at=_utc(row.finished_at),
         duration_ms=row.duration_ms,
         turns=[
             TurnRecord(
@@ -154,7 +163,7 @@ def _to_record(row: Analysis) -> AnalysisRecord:
                 analyst=t.analyst,
                 emoji=t.emoji,
                 text=t.text,
-                created_at=t.created_at,
+                created_at=_utc(t.created_at),
             )
             for t in row.turns
         ],

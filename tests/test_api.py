@@ -68,6 +68,7 @@ class TestCreate:
             {"text": "x", "rounds": 0},
             {"text": "x", "rounds": 99},
             {"text": "x", "model": "openai/gpt"},
+            {"text": "x", "model": "anthropic/does-not-exist"},
             {"text": "x", "question": "q" * 501},
         ],
     )

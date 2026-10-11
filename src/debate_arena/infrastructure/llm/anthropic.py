@@ -19,10 +19,17 @@ logger = logging.getLogger(__name__)
 
 
 class AnthropicProvider:
+    """``ChatProvider`` over ``anthropic.AsyncAnthropic`` (Opus 5.5 request shape)."""
+
     name = "anthropic"
 
     def __init__(self, api_key: str | None = None, *, client: Any | None = None) -> None:
         self._client = client or anthropic.AsyncAnthropic(api_key=api_key)
+
+    async def aclose(self) -> None:
+        close = getattr(self._client, "close", None)
+        if close is not None:
+            await close()
 
     async def complete(self, request: ChatRequest) -> Completion:
         response = await self._client.messages.create(**self._kwargs(request))
@@ -39,7 +46,10 @@ class AnthropicProvider:
         _raise_on_refusal(response)
         value = getattr(response, "parsed_output", None)
         if value is None:
-            raise InvalidVerdict("anthropic: no parsed_output in structured response")
+            raise InvalidVerdict(
+                "anthropic: no parsed_output in structured response "
+                f"(stop_reason={getattr(response, 'stop_reason', None)!r})"
+            )
         return StructuredCompletion(value=value, usage=_usage_of(response), raw=_text_of(response))
 
     @staticmethod

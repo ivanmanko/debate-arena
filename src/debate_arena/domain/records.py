@@ -1,12 +1,13 @@
 """Persistence-shaped views of an analysis, independent of the storage engine (SPEC §2)."""
 
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
 from .schemas import Verdict
 
-AnalysisStatus = str  # running | finished | failed
+AnalysisStatus = Literal["running", "finished", "failed"]
 
 
 class TurnRecord(BaseModel):

@@ -86,3 +86,14 @@ async def test_mark_interrupted_only_touches_running(repo):
     assert await repo.mark_interrupted() == 1
     assert (await repo.get(running)).error == "interrupted"
     assert (await repo.get(done)).status == "finished"
+
+
+async def test_datetimes_are_timezone_aware_from_sqlite(repo):
+    analysis_id = await _create(repo)
+    await repo.add_turn(analysis_id, 1, "Эмпирик", "🔎", "x")
+    await repo.finish(analysis_id, "finished", None, 1)
+    record = await repo.get(analysis_id)
+    assert record.created_at.tzinfo is not None
+    assert record.finished_at.tzinfo is not None
+    assert record.turns[0].created_at.tzinfo is not None
+    assert (await repo.list(limit=1))[0].created_at.tzinfo is not None
