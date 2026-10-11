@@ -105,6 +105,9 @@ code { font-family: var(--mono); font-size: .9em; background: var(--surface-2); 
 .compose { display: flex; flex-direction: column; gap: 14px; }
 .field { display: flex; flex-direction: column; gap: 6px; position: relative; }
 .label { font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.label-row { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.label-row .btn { color: var(--text-muted); }
+textarea.dragover { outline: 2px dashed var(--primary); outline-offset: 2px; }
 textarea, input[type="text"], select { font: inherit; color: var(--text); background: var(--surface-2); border: 1px solid var(--border); border-radius: 10px; padding: 10px 12px; width: 100%; }
 textarea { resize: vertical; min-height: 160px; line-height: 1.55; }
 textarea:focus, input:focus, select:focus { outline: 2px solid color-mix(in srgb, var(--primary) 45%, transparent); border-color: var(--primary); }

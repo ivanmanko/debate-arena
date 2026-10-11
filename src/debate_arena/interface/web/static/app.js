@@ -120,6 +120,7 @@
       $("#mode-hint").textContent = state.mode === "auto" ? (looksDialogue ? `· похоже на диалог: ${[...names].slice(0, 4).join(", ")}` : "· похоже на текст") : "";
     };
     text.addEventListener("input", () => { $("#counter").textContent = text.value.length; updateModeHint(); });
+    initFileInput(text);
     $("#mode").addEventListener("click", (e) => {
       const b = e.target.closest("button[data-mode]"); if (!b) return;
       state.mode = b.dataset.mode;
@@ -150,6 +151,55 @@
       finally { $("#submit").disabled = false; }
     });
     $("#btn-new").addEventListener("click", () => { location.hash = "#/new"; });
+  }
+
+  // ---------- Text files (.txt / .md) — read in the browser, never truncated (SPEC §4.0c) ----------
+  const FILE_EXTENSIONS = [".txt", ".md"];
+
+  function decodeText(bytes) {
+    if (bytes[0] === 0xff && bytes[1] === 0xfe) return new TextDecoder("utf-16le").decode(bytes);
+    if (bytes[0] === 0xfe && bytes[1] === 0xff) return new TextDecoder("utf-16be").decode(bytes);
+    try { return new TextDecoder("utf-8", { fatal: true }).decode(bytes); }
+    catch (_) { return new TextDecoder("windows-1251").decode(bytes); }
+  }
+
+  async function readTextFile(file, maxChars) {
+    const name = file.name.toLowerCase();
+    if (!FILE_EXTENSIONS.some((ext) => name.endsWith(ext))) throw new Error(`«${file.name}»: поддерживаются только файлы .txt и .md.`);
+    // UTF-8 spends at most 4 bytes per character: a bigger file is over the limit without reading it.
+    if (file.size > maxChars * 4 + 4) throw new Error(`«${file.name}» слишком большой (${Math.round(file.size / 1024)} КБ): лимит — ${maxChars} символов.`);
+    const content = decodeText(new Uint8Array(await file.arrayBuffer())).replace(/\r\n?/g, "\n");
+    if (content.includes("\0")) throw new Error(`«${file.name}» не похож на текстовый файл.`);
+    if (!content.trim()) throw new Error(`«${file.name}» пустой.`);
+    const length = content.trim().length;
+    if (length > maxChars) throw new Error(`В «${file.name}» ${length} символов, лимит — ${maxChars}. Сократите текст и загрузите снова.`);
+    return content.trim();
+  }
+
+  function initFileInput(text) {
+    const input = $("#file");
+    const err = $("#compose-error");
+    const load = async (file) => {
+      err.classList.add("hidden");
+      try {
+        const content = await readTextFile(file, state.config?.max_text_chars ?? Number(text.maxLength));
+        if (text.value.trim() && !confirm(`Заменить введённый текст содержимым «${file.name}»?`)) return;
+        text.value = content;
+        text.dispatchEvent(new Event("input"));
+        toast(`Загружен «${file.name}»: ${content.length} символов`);
+      } catch (ex) { err.textContent = ex.message; err.classList.remove("hidden"); }
+    };
+    $("#file-btn").addEventListener("click", () => input.click());
+    input.addEventListener("change", () => { if (input.files[0]) load(input.files[0]); input.value = ""; });
+    const hasFiles = (e) => [...(e.dataTransfer?.types || [])].includes("Files");
+    text.addEventListener("dragover", (e) => { if (!hasFiles(e)) return; e.preventDefault(); text.classList.add("dragover"); });
+    text.addEventListener("dragleave", () => text.classList.remove("dragover"));
+    text.addEventListener("drop", (e) => {
+      if (!hasFiles(e)) return;
+      e.preventDefault(); text.classList.remove("dragover");
+      if (e.dataTransfer.files.length > 1) toast("Загружаю только первый файл");
+      load(e.dataTransfer.files[0]);
+    });
   }
 
   // ---------- Analysis view ----------
