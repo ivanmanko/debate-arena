@@ -9,10 +9,10 @@ from __future__ import annotations
 import os
 import tempfile
 
-_tmp = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
-_tmp.close()
+_fd, _db_path = tempfile.mkstemp(suffix=".db")
+os.close(_fd)
 
-os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_tmp.name}"
+os.environ["DATABASE_URL"] = f"sqlite+aiosqlite:///{_db_path}"
 os.environ["MOCK_LLM"] = "1"
 os.environ["BOT_TOKEN"] = "test:token"
 # Keep the suite fast — no real provider keys, mock engine handles everything.

@@ -1,22 +1,25 @@
 [project]
 name = "debate-arena"
-version = "0.1.0"
-description = "Telegram bot: drop a topic, several LLM philosopher-personas debate in rounds, a judge-bot scores them and declares who was more convincing."
+version = "0.2.0"
+description = "Rational Check: three rational LLM analysts dissect a text by the common-sense manifesto; a judge issues a structured verdict. Web UI + Telegram bot."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 authors = [{ name = "Ivan" }]
 dependencies = [
-    "aiogram>=3.13,<4",
-    "crewai>=0.80,<0.90",
+    "anthropic>=1.13,<2",          # Anthropic provider, official SDK (ADR-001)
+    "httpx>=0.28",                 # DeepSeek OpenAI-compatible endpoint (ADR-001)
+    "fastapi>=0.115,<1",           # web API + static frontend (ADR-003)
+    "uvicorn[standard]>=0.30",
+    "aiogram>=3.13,<4",            # Telegram bot, thin second interface (ADR-004)
     "sqlalchemy[asyncio]>=2.0,<3",
     "aiosqlite>=0.20",
     "asyncpg>=0.29",
-    "alembic>=1.13",
-    "pydantic>=2.7,<3",
+    "pydantic>=2.8,<3",
     "pydantic-settings>=2.4,<3",
+    "python-dotenv>=1.0",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 dev = [
     "ruff>=0.6",
     "pytest>=8.2",
@@ -24,7 +27,8 @@ dev = [
 ]
 
 [project.scripts]
-debate-arena = "debate_arena.bot.main:run"
+rational-check = "debate_arena.main:run"
+rational-check-bot = "debate_arena.interface.bot.main:run"
 
 [build-system]
 requires = ["hatchling"]
@@ -39,11 +43,15 @@ target-version = "py312"
 src = ["src", "tests"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B", "W"]
+select = ["E", "F", "I", "UP", "B", "W", "SIM", "ASYNC"]
 ignore = ["B008"]
 
+[tool.ruff.lint.isort]
+known-first-party = ["debate_arena", "tests"]
+
 [tool.ruff.lint.per-file-ignores]
-# Prompt/persona text is intentionally kept as long, readable literal lines.
+# Prompt text is intentionally kept as long, readable literal lines.
+"src/debate_arena/domain/prompts.py" = ["E501"]
 "src/debate_arena/storage/seed.py" = ["E501"]
 "src/debate_arena/debate/engine.py" = ["E501"]
 
@@ -51,3 +59,5 @@ ignore = ["B008"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
 testpaths = ["tests"]
+addopts = "-m 'not integration'"
+markers = ["integration: требует живых сервисов или ключей провайдеров"]
