@@ -211,7 +211,7 @@ class AnalysisService:
         return record
 
     async def list(self, limit: int | None = None) -> list[AnalysisSummary]:
-        """Newest first, capped by ``history_limit`` (SPEC §3.5)."""
+        """Newest first, capped by ``history_limit`` (SPEC §3.6)."""
         return await self._repo.list(
             min(limit or self._settings.history_limit, self._settings.history_limit)
         )

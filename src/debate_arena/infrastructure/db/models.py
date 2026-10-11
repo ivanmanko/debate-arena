@@ -68,7 +68,7 @@ class VerdictRow(Base):
         ForeignKey("analyses.id", ondelete="CASCADE"), unique=True
     )
     payload: Mapped[str] = mapped_column(Text)
-    # Denormalised for the history list (SPEC §3.5) — avoids parsing JSON per row.
+    # Denormalised for the history list (SPEC §3.6) — avoids parsing JSON per row.
     rationality_score: Mapped[int] = mapped_column(Integer)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow)
 
