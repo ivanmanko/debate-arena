@@ -14,6 +14,7 @@ from debate_arena.domain.ports import ChatRequest, Completion, Usage
 from debate_arena.main import create_app
 from tests.fakes.llm import FakeProvider
 from tests.fakes.repo import InMemoryRepository
+from tests.fakes.share import FakePublisher
 
 
 class SlowProvider(FakeProvider):
@@ -278,6 +279,108 @@ class TestChat:
             assert c.get(f"/api/analyses/{analysis_id}").json()["chat"] == []
 
 
+class TestShare:
+    @pytest.fixture
+    def setup(self):
+        publisher = FakePublisher()
+        app = create_app(
+            _settings(),
+            repo=InMemoryRepository(),
+            provider_factory=lambda model: FakeProvider(),
+            publisher=publisher,
+        )
+        with TestClient(app) as c:
+            yield c, publisher
+
+    def _finished(self, client, text="Тезис."):
+        analysis_id = client.post("/api/analyses", json={"text": text, "rounds": 1}).json()["id"]
+        _events(client, analysis_id)
+        return analysis_id
+
+    def test_publish_returns_link_and_detail_shows_it(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        assert client.get(f"/api/analyses/{analysis_id}").json()["share"] is None
+        response = client.post(f"/api/analyses/{analysis_id}/share")
+        assert response.status_code == 200
+        body = response.json()
+        assert set(body) == {"url", "created_at"}
+        assert body["url"].startswith("https://snapshots.test/")
+        assert client.get(f"/api/analyses/{analysis_id}").json()["share"] == body
+        assert len(publisher.objects) == 1
+
+    def test_republish_is_idempotent(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        first = client.post(f"/api/analyses/{analysis_id}/share").json()
+        assert client.post(f"/api/analyses/{analysis_id}/share").json() == first
+        assert len(publisher.calls) == 1
+
+    def test_missing_is_404(self, setup):
+        client, _ = setup
+        assert client.post("/api/analyses/999/share").status_code == 404
+        assert client.delete("/api/analyses/999/share").status_code == 404
+
+    def test_running_is_409(self):
+        app = create_app(
+            _settings(),
+            repo=InMemoryRepository(),
+            provider_factory=lambda model: SlowProvider(),
+            publisher=FakePublisher(),
+        )
+        with TestClient(app) as c:
+            analysis_id = c.post("/api/analyses", json={"text": "t", "rounds": 1}).json()["id"]
+            assert c.post(f"/api/analyses/{analysis_id}/share").status_code == 409
+            _events(c, analysis_id)
+
+    def test_storage_failure_is_502(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        publisher.fail = True
+        assert client.post(f"/api/analyses/{analysis_id}/share").status_code == 502
+        assert client.get(f"/api/analyses/{analysis_id}").json()["share"] is None
+
+    def test_withdraw(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        client.post(f"/api/analyses/{analysis_id}/share")
+        assert client.delete(f"/api/analyses/{analysis_id}/share").status_code == 204
+        assert publisher.objects == {}
+        assert client.get(f"/api/analyses/{analysis_id}").json()["share"] is None
+        assert client.delete(f"/api/analyses/{analysis_id}/share").status_code == 404
+
+    def test_withdraw_storage_failure_is_502(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        client.post(f"/api/analyses/{analysis_id}/share")
+        publisher.fail = True
+        assert client.delete(f"/api/analyses/{analysis_id}/share").status_code == 502
+        assert client.get(f"/api/analyses/{analysis_id}").json()["share"] is not None
+
+    def test_deleting_analysis_withdraws_snapshot(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        client.post(f"/api/analyses/{analysis_id}/share")
+        assert client.delete(f"/api/analyses/{analysis_id}").status_code == 204
+        assert publisher.objects == {}
+
+    def test_deleting_analysis_keeps_it_when_storage_fails(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client)
+        client.post(f"/api/analyses/{analysis_id}/share")
+        publisher.fail = True
+        assert client.delete(f"/api/analyses/{analysis_id}").status_code == 502
+        assert client.get(f"/api/analyses/{analysis_id}").status_code == 200
+
+    def test_dialogue_snapshot_has_labels_only(self, setup):
+        client, publisher = setup
+        analysis_id = self._finished(client, text="Иван: вода мокрая\nМария: Иван, нет")
+        client.post(f"/api/analyses/{analysis_id}/share")
+        (page,) = publisher.objects.values()
+        assert "Собеседник А" in page
+        assert "Иван" not in page and "Мария" not in page
+
+
 class TestConfigAndHealth:
     def test_config_exposes_models_defaults_and_analysts(self, client):
         config = client.get("/api/config").json()
@@ -287,6 +390,7 @@ class TestConfigAndHealth:
         assert config["default_rounds"] == 2 and config["max_rounds"] == 3
         assert config["max_text_chars"] == 20_000
         assert (config["chat_max_chars"], config["chat_max_messages"]) == (2_000, 20)
+        assert config["share_backend"] == "local"
         assert len(config["analysts"]) == 3
         assert all(a["emoji"] and a["focus"] for a in config["analysts"])
 

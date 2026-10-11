@@ -126,3 +126,22 @@ async def test_datetimes_are_timezone_aware_from_sqlite(repo):
     assert record.finished_at.tzinfo is not None
     assert record.turns[0].created_at.tzinfo is not None
     assert (await repo.list(limit=1))[0].created_at.tzinfo is not None
+
+
+async def test_share_round_trip_and_delete(repo):
+    analysis_id = await _create(repo)
+    assert (await repo.get(analysis_id)).share is None
+    share = await repo.save_share(analysis_id, "k" * 22, "https://snapshots.test/k.html")
+    assert (share.key, share.url) == ("k" * 22, "https://snapshots.test/k.html")
+    assert share.created_at.tzinfo is not None
+    assert (await repo.get(analysis_id)).share == share
+    assert await repo.delete_share(analysis_id) is True
+    assert (await repo.get(analysis_id)).share is None
+    assert await repo.delete_share(analysis_id) is False
+
+
+async def test_share_goes_with_the_analysis(repo):
+    analysis_id = await _create(repo)
+    await repo.save_share(analysis_id, "k" * 22, "https://snapshots.test/k.html")
+    assert await repo.delete(analysis_id) is True
+    assert await repo.delete_share(analysis_id) is False

@@ -8,6 +8,7 @@ from debate_arena.domain.records import (
     AnalysisRecord,
     AnalysisSummary,
     ChatMessageRecord,
+    ShareRecord,
     TurnRecord,
 )
 from debate_arena.domain.schemas import Verdict
@@ -78,6 +79,18 @@ class InMemoryRepository:
         )
         self.rows[analysis_id].chat.extend(pair)
         return pair
+
+    async def save_share(self, analysis_id: int, key: str, url: str) -> ShareRecord:
+        share = ShareRecord(key=key, url=url, created_at=datetime.now(UTC))
+        self.rows[analysis_id].share = share
+        return share
+
+    async def delete_share(self, analysis_id: int) -> bool:
+        row = self.rows.get(analysis_id)
+        if row is None or row.share is None:
+            return False
+        row.share = None
+        return True
 
     async def finish(
         self, analysis_id: int, status: str, error: str | None, duration_ms: int
