@@ -67,6 +67,8 @@ class Settings(BaseSettings):
     # messages come after reading and thinking, often more than 5 minutes apart.
     cache_ttl_analysis: Literal["5m", "1h"] = "5m"
     cache_ttl_chat: Literal["5m", "1h"] = "1h"
+    # A refusal by a safety classifier is re-run on Anthropic's recommended model (SPEC §4.9).
+    refusal_fallback: bool = True
 
     # --- Analysis shape (SPEC §7) ---
     default_rounds: int = 2

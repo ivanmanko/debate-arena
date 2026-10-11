@@ -81,6 +81,7 @@ gcloud run services update debate-arena --project ivan-pets --region europe-west
 | `DEFAULT_ROUNDS`, `MAX_ROUNDS` | раунды | 2, 3 |
 | `MAX_TEXT_CHARS` | лимит текста; длиннее — 422, ничего не обрезается | 200 000 |
 | `CACHE_TTL_ANALYSIS` / `CACHE_TTL_CHAT` | сколько живёт кэш материала у аналитиков / в чате с судьёй (ADR-007) | `5m` / `1h` |
+| `REFUSAL_FALLBACK` | отказ классификатора Anthropic перезапускается на рекомендованной резервной модели (SPEC §4.9) | true |
 | `LANGUAGE` | язык реплик и вердикта | русский |
 | `DATABASE_URL` | SQLAlchemy async URL | локальный SQLite |
 | `PUBLIC_URL` | адрес веба для ссылок из бота и локальных публикаций | — |
@@ -179,8 +180,6 @@ uv run ruff check . && uv run ruff format --check src tests
 - **Потоковые токены внутри реплики** — SSE отдаёт реплику целиком; на Opus 5.5 с
   thinking реплика идёт 20–60 с, индикатор «думает…» это покрывает. Чтобы добавить:
   `messages.stream` в `AnthropicProvider` + событие `delta`.
-- **Серверный fallback при отказе модели** (beta `server-side-fallback`) не включён:
-  отказ показывается как ошибка разбора. Включить — флаг в `AnthropicProvider`.
 - **Веб-поиск / проверка по источникам** — аналитики работают только с текстом и обязаны
   писать «не могу проверить». Нужен tool use у провайдера.
 - **Аутентификация и квоты** — инструмент личный.

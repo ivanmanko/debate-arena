@@ -22,7 +22,9 @@ def build_provider(ref: ModelRef, settings: Settings) -> ChatProvider:
     if ref.provider == "anthropic":
         if not settings.anthropic_api_key:
             raise ProviderNotConfigured("ANTHROPIC_API_KEY is not set")
-        return AnthropicProvider(api_key=settings.anthropic_api_key)
+        return AnthropicProvider(
+            api_key=settings.anthropic_api_key, refusal_fallback=settings.refusal_fallback
+        )
     if ref.provider == "deepseek":
         if not settings.deepseek_api_key:
             raise ProviderNotConfigured("DEEPSEEK_API_KEY is not set")
