@@ -4,8 +4,10 @@ from __future__ import annotations
 
 from debate_arena.domain.analysts import ANALYSTS
 from debate_arena.domain.prompts import (
+    FRAME_NOTE,
     MANIFEST,
     cross_round_user,
+    judge_chat_system_prompt,
     judge_system_prompt,
     judge_user,
     participants_from_prompt,
@@ -41,6 +43,35 @@ class TestAnalysts:
             assert "соперничеств" in a.system_prompt
 
 
+class TestFrameDisclosure:
+    """The manifesto is a position, not a neutral ground (ADR-002 revision, SPEC §4)."""
+
+    def test_analysts_do_not_claim_to_stand_outside_any_school(self):
+        for a in ANALYSTS:
+            assert "не принадлежишь ни к какой философской школе" not in a.system_prompt
+
+    def test_frame_note_names_the_manifesto_as_a_position(self):
+        assert "не нейтральная" in FRAME_NOTE
+        assert "стороной спора" in FRAME_NOTE
+        for topic in ("фальсифицируемост", "реализм", "здравым смыслом", "должное"):
+            assert topic in FRAME_NOTE, topic
+        assert "не ошибка" in FRAME_NOTE  # disagreeing with the manifesto is not a fallacy
+
+    def test_every_role_carries_the_frame_note(self):
+        for a in ANALYSTS:
+            assert FRAME_NOTE in a.system_prompt
+        assert FRAME_NOTE in judge_system_prompt(LANG)
+        assert FRAME_NOTE in judge_chat_system_prompt(LANG)
+
+    def test_burden_of_proof_zeroes_only_factual_claims(self):
+        pillar = next(line for line in MANIFEST.splitlines() if line.startswith("3."))
+        assert "о фактах" in pillar
+        assert "умножается на ноль" in pillar
+        for kind in ("ценност", "норм", "определени"):
+            assert kind in pillar, kind
+        assert "не обнуляют" in pillar
+
+
 class TestRoundPrompts:
     def test_round_one_is_blind_and_structured(self):
         text = round_one_user("Земля плоская, потому что горизонт ровный.", None, LANG)
@@ -48,6 +79,12 @@ class TestRoundPrompts:
         assert "Независимый разбор" in text
         assert "Принимаю:" not in text  # cross-check blocks belong to later rounds
         assert LANG in text
+
+    def test_round_one_classifies_the_disagreement(self):
+        text = round_one_user("тезис", None, LANG)
+        assert "Тип разногласия" in text
+        for kind in ("о фактах", "о целях и нормах", "о словах"):
+            assert kind in text, kind
 
     def test_round_one_includes_optional_question(self):
         text = round_one_user("тезис", "Правда ли это?", LANG)
@@ -93,6 +130,9 @@ class TestJudgePrompts:
         assert "кратко и конкретно" not in system
         user = judge_user("t", None, "x", [], LANG)
         assert "narrative" in user
+
+    def test_judge_narrative_names_the_disagreement_type(self):
+        assert "тип разногласия" in judge_system_prompt(LANG)
 
     def test_judge_user_text_mode_has_transcript_and_no_participants(self):
         text = judge_user("исходный текст", "вопрос?", "[Раунд 1] A: ...", [], LANG)
