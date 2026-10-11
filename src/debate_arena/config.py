@@ -10,7 +10,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Literal
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from .domain.schemas import parse_model_ref
@@ -18,6 +18,11 @@ from .domain.schemas import parse_model_ref
 MOCK_MODEL = "mock/rational"
 
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
+
+# Below these a reply is cut mid-sentence and the judge JSON never closes (SPEC §7):
+# on Opus 5.5 thinking tokens count toward max_tokens.
+MIN_TURN_MAX_TOKENS = 1024
+MIN_JUDGE_MAX_TOKENS = 4096
 
 # Catalogue shown in the UI model picker, per provider (only providers with a key).
 _ANTHROPIC_MODELS = [
@@ -87,6 +92,22 @@ class Settings(BaseSettings):
     def _valid_model_ref(cls, value: str) -> str:
         parse_model_ref(value)  # raises ValueError with a readable message
         return value
+
+    @model_validator(mode="after")
+    def _token_budgets_are_sane(self) -> Settings:
+        if self.turn_max_tokens < MIN_TURN_MAX_TOKENS:
+            raise ValueError(
+                f"TURN_MAX_TOKENS={self.turn_max_tokens} is below {MIN_TURN_MAX_TOKENS}: replies "
+                "would be cut mid-sentence (thinking counts toward the limit). Remove the legacy "
+                "line from .env or raise it."
+            )
+        if self.judge_max_tokens < MIN_JUDGE_MAX_TOKENS:
+            raise ValueError(
+                f"JUDGE_MAX_TOKENS={self.judge_max_tokens} is below {MIN_JUDGE_MAX_TOKENS}: the "
+                "judge's JSON verdict would be truncated. Remove the legacy line from .env or "
+                "raise it."
+            )
+        return self
 
     def has_key(self, provider: str) -> bool:
         """Whether the provider can be used: has an API key, or needs none (mock)."""

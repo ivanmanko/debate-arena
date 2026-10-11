@@ -234,6 +234,23 @@ class TestAnthropicProvider:
         assert client.messages.kwargs["output_format"] is Verdict
 
 
+class TestAnthropicTruncation:
+    async def test_truncated_structured_reply_is_invalid_verdict(self):
+        from pydantic import ValidationError
+
+        class Raising:
+            async def parse(self, **kwargs):
+                raise ValidationError.from_exception_data("Verdict", [])
+
+        provider = AnthropicProvider(client=SimpleNamespace(messages=Raising()))
+        from debate_arena.domain.exceptions import InvalidVerdict
+
+        with pytest.raises(InvalidVerdict, match="JUDGE_MAX_TOKENS"):
+            await provider.complete_structured(
+                ChatRequest(model="m", system="s", user="u", max_tokens=900), Verdict
+            )
+
+
 class TestDeepSeekRetries:
     async def test_retries_transient_status_then_succeeds(self):
         statuses = iter([503, 429, 200])

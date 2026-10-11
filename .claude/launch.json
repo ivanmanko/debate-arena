@@ -4,7 +4,7 @@
     {
       "name": "web-mock",
       "runtimeExecutable": "env",
-      "runtimeArgs": ["MOCK_LLM=1", "DATABASE_URL=sqlite+aiosqlite:////tmp/rational-check-preview.db", "uv", "run", "uvicorn", "debate_arena.main:app", "--port", "8765"],
+      "runtimeArgs": ["MOCK_LLM=1", "DATABASE_URL=sqlite+aiosqlite:////tmp/rational-check-preview.db", "uv", "run", "uvicorn", "--factory", "debate_arena.main:create_app", "--port", "8765"],
       "port": 8765
     }
   ]

@@ -11,6 +11,7 @@ import logging
 from typing import Any
 
 import anthropic
+from pydantic import ValidationError
 
 from ...domain.exceptions import InvalidVerdict, ProviderRefused
 from ...domain.ports import ChatRequest, Completion, ModelT, StructuredCompletion, Usage
@@ -42,7 +43,17 @@ class AnthropicProvider:
     async def complete_structured(
         self, request: ChatRequest, schema: type[ModelT]
     ) -> StructuredCompletion[ModelT]:
-        response = await self._client.messages.parse(**self._kwargs(request), output_format=schema)
+        try:
+            response = await self._client.messages.parse(
+                **self._kwargs(request), output_format=schema
+            )
+        except ValidationError as exc:
+            # The SDK validates before we see stop_reason; a cut-off JSON is the usual cause.
+            raise InvalidVerdict(
+                "anthropic: structured reply did not match the schema — most likely truncated "
+                f"by max_tokens={request.max_tokens} (thinking counts toward it); raise "
+                f"JUDGE_MAX_TOKENS. Detail: {str(exc).splitlines()[-2:]}"
+            ) from exc
         _raise_on_refusal(response)
         value = getattr(response, "parsed_output", None)
         if value is None:

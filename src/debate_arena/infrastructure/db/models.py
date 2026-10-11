@@ -58,7 +58,8 @@ class Turn(Base):
 
 
 class VerdictRow(Base):
-    __tablename__ = "verdicts"
+    # Not "verdicts": a v0.1 database file may still hold that table with another shape.
+    __tablename__ = "analysis_verdicts"
 
     id: Mapped[int] = mapped_column(primary_key=True)
     analysis_id: Mapped[int] = mapped_column(

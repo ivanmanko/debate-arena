@@ -1,4 +1,7 @@
-"""FastAPI application: wiring of settings, database, providers and the service (ADR-004)."""
+"""FastAPI application: wiring of settings, database, providers and the service (ADR-004).
+
+Run with ``rational-check`` or ``uvicorn --factory debate_arena.main:create_app``.
+"""
 
 from __future__ import annotations
 
@@ -86,5 +89,3 @@ def run() -> None:
     settings = get_settings()
     uvicorn.run(create_app(settings), host=settings.web_host, port=settings.web_port)
 
-
-app = create_app()

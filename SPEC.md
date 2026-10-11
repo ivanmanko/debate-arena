@@ -160,8 +160,8 @@ SSE_HEARTBEAT_S секунд. Для завершённого разбора (п
 | `MODEL_ANALYST` | `anthropic/claude-opus-5-5` | Ключ Anthropic — основной у пользователя; Opus 5.5 — текущая модель линейки |
 | `MODEL_JUDGE` | `anthropic/claude-opus-5-5` | Судья должен быть не слабее аналитиков |
 | `ANALYST_EFFORT` / `JUDGE_EFFORT` | `medium` / `high` | Opus 5.5: thinking всегда включён, effort — единственный регулятор; судье — больше |
-| `TURN_MAX_TOKENS` | 6 000 | На Opus 5.5 thinking входит в лимит; реплика ≤ ~1 500 токенов + запас |
-| `JUDGE_MAX_TOKENS` | 16 000 | Структурированный вердикт + thinking |
+| `TURN_MAX_TOKENS` | 6 000 (мин. 1 024) | На Opus 5.5 thinking входит в лимит; реплика ≤ ~1 500 токенов + запас. Ниже минимума приложение не стартует |
+| `JUDGE_MAX_TOKENS` | 16 000 (мин. 4 096) | Структурированный вердикт + thinking; при 900 JSON обрывался (живой прогон 2026-10-11) |
 | `DEEPSEEK_TEMPERATURE` | 0.3 | Аналитика, не креатив; Anthropic temperature не принимает (SDK 1.13) |
 | `LLM_CONCURRENCY` | 3 | Параллельный раунд 1 — ровно три вызова |
 | `DEEPSEEK_MAX_RETRIES` | 2 | Зеркалит дефолт ретраев Anthropic SDK; httpx сам не ретраит (408/409/429/5xx, сетевые) |

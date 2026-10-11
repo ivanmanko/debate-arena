@@ -49,3 +49,12 @@ def test_effective_models_in_mock_mode_point_to_mock():
     s = _settings()
     assert s.effective_model_analyst == "mock/rational"
     assert s.effective_model_judge == "mock/rational"
+
+
+def test_tiny_token_budgets_fail_fast_with_a_readable_message():
+    import pytest
+
+    with pytest.raises(ValueError, match="TURN_MAX_TOKENS=450"):
+        _settings(turn_max_tokens=450)
+    with pytest.raises(ValueError, match="JUDGE_MAX_TOKENS=900"):
+        _settings(judge_max_tokens=900)
