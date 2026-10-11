@@ -8,8 +8,8 @@ Rational Check: веб-инструмент (и Telegram-бот), где три 
 
 Python 3.12, FastAPI + vanilla JS фронтенд, SQLAlchemy (SQLite локально / Postgres в
 Docker), aiogram для бота. LLM — Anthropic (основной) и DeepSeek через один `Protocol`;
-без ключей работает mock-режим. Личный инструмент, один процесс, деплой через
-`docker compose`.
+без ключей работает mock-режим. Личный инструмент, один процесс; деплой — Cloud Run
+(веб, ADR-005) или `docker compose`.
 
 ## Source of truth
 
@@ -36,10 +36,25 @@ uv run pytest                         # unit + контракт API, без се
 uv run ruff check . && uv run ruff format --check .
 ```
 
-### Docker / deploy
+### Docker
 ```bash
 docker compose up -d --build          # web + postgres; bot — профиль `bot`
 ```
+
+### Deploy (Google Cloud Run, ADR-005) — только после гейта
+```bash
+gcloud run deploy debate-arena --source . --region europe-west1 --port 8000 \
+  --no-allow-unauthenticated --iap \
+  --min-instances 0 --max-instances 1 --no-cpu-throttling \
+  --memory 512Mi --cpu 1 --timeout 3600 \
+  --update-env-vars LITESTREAM_REPLICA_URL=gcs://ivan-pets-litestream/debate-arena \
+  --update-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest
+```
+Проект `ivan-pets`, скилл `personal:gcp-manager`. Один инстанс (события в памяти, ADR-003),
+SQLite реплицируется Litestream 0.3.13 в `gs://ivan-pets-litestream/debate-arena`, доступ
+через IAP. Повторный деплой нового кода — та же команда (или просто
+`gcloud run deploy debate-arena --source .`: конфигурация прошлой ревизии сохраняется).
+Бот в Cloud Run не деплоится (long polling).
 
 ## Architecture
 
@@ -62,6 +77,7 @@ src/debate_arena/
   structured output — ADR-002.
 - FastAPI + SSE + одностраничный фронтенд без сборки, события в памяти, факты в БД — ADR-003.
 - Раскладка слоёв, бот как тонкий второй интерфейс — ADR-004.
+- Cloud Run: один инстанс, SQLite + Litestream → GCS, доступ через IAP — ADR-005.
 - Fail-fast: без ключа выбранного провайдера и без `MOCK_LLM` приложение не стартует с
   реальной моделью — уходит в mock и явно сообщает об этом в `/api/config`.
 

@@ -47,6 +47,27 @@ docker compose up -d --build                  # http://localhost:8000
 docker compose --profile bot up -d            # плюс Telegram-бот
 ```
 
+### Google Cloud Run (веб)
+
+Живёт в личном GCP-проекте `ivan-pets`, вход через Google (IAP). Подробности и причины —
+[ADR-005](docs/adr/005-cloud-run-deploy.md).
+
+```bash
+gcloud run deploy debate-arena --source . --region europe-west1 --port 8000 \
+  --no-allow-unauthenticated --iap \
+  --min-instances 0 --max-instances 1 --no-cpu-throttling \
+  --memory 512Mi --cpu 1 --timeout 3600 \
+  --update-env-vars LITESTREAM_REPLICA_URL=gcs://ivan-pets-litestream/debate-arena \
+  --update-secrets ANTHROPIC_API_KEY=anthropic-api-key:latest
+```
+
+- Один инстанс: события разбора живут в памяти процесса.
+- SQLite на эфемерном диске инстанса непрерывно реплицируется
+  [Litestream](https://litestream.io) в GCS и восстанавливается при старте
+  (`deploy/entrypoint.sh`). Без `LITESTREAM_REPLICA_URL` entrypoint ничего не делает.
+- Ключ Anthropic — в Secret Manager (`anthropic-api-key`).
+- Telegram-бот в Cloud Run не деплоится — только через `docker compose`.
+
 ## Конфигурация
 
 Всё через `.env` (см. `.env.example`). Главное:
